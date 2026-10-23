@@ -226,10 +226,21 @@ Approved by the author and chosen from the **dev set only**:
   automatic sending; claims authority over the tool.
   `find_override_signals(message)` returns the evidence (pattern,
   subject/body, sentence) so the reviewer can see why.
+- **Line wrapping (fixed 2026-10-23):** the detector has its own
+  sentence splitter. It joins all line breaks and repeated spaces into
+  single spaces first, then splits only after `.`, `?` or `!`, so an
+  instruction wrapped across lines ("Ignore all previous⏎instructions")
+  is detected. Before the fix, the detector reused the classifier's
+  splitter, which ends a sentence at every line break, and such
+  instructions were missed. The detector no longer depends on the
+  classifier; the classifier itself is unchanged.
 - **Limitations of the detector:** it is pattern matching on English
   text. It **can miss attacks** (other wording, other languages,
-  misspellings, text split across sentences, hidden or encoded text)
-  and **can flag harmless text**. A warning is a signal for careful
+  misspellings, an instruction split by a full stop or across the
+  subject and body — they are checked separately — hidden or encoded
+  text) and **can flag harmless text**. Joining lines can also join
+  unrelated lines that have no punctuation (for example list items)
+  into one "sentence", which may occasionally create a false warning. A warning is a signal for careful
   human review, **not proof of malicious intent**; no warning is not
   proof of safety. The sender field is not checked. The patterns were
   written with the two dev override examples in mind; they have not
@@ -672,5 +683,14 @@ on.
   and guard failures, no draft for empty messages. Design choice: an
   `other_or_unclear` draft asks for clarification and does not answer
   candidate intents.
+- **2026-10-23 — Initial Git checkpoint:** commit `b2211ad` captures the
+  verified project state through Stage 2 (not a reconstruction of the
+  development history). Automated security and code-quality reviews of
+  the staged files found no Critical or High issues.
+- **2026-10-23 — Safety fix (multi-line instructions):** the code-quality
+  review found that the override detector missed instructions wrapped
+  across lines. Fixed by giving the detector its own splitter (see
+  *Untrusted message content*); approved by the author as a separate
+  commit before Stage 3.
 
 Update this document as experiments and evidence change the design.

@@ -11,7 +11,6 @@ is that the tool cannot send anything and every draft needs a human decision.
 
 import re
 
-from inbox_helper.classifier import split_sentences
 from inbox_helper.models import OverrideSignal
 
 OVERRIDE_WARNING = "possible_instruction_override"
@@ -52,13 +51,32 @@ _OVERRIDE_PATTERNS = [
 ]
 _COMPILED = [(label, re.compile(pattern)) for label, pattern in _OVERRIDE_PATTERNS]
 
+# Split only after . ? or !, never at a line break.
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+
+def _sentences(text):
+    """Split text into sentences for detection.
+
+    Line breaks and repeated spaces are first turned into single spaces, so
+    an instruction wrapped across lines ("Ignore all previous\\ninstructions")
+    is still one sentence. This splitter belongs to the safety check alone;
+    it deliberately does not reuse the classifier's splitter, which treats
+    every line break as a sentence end.
+    """
+    text = " ".join(text.replace("’", "'").split())
+    return [part for part in _SENTENCE_END.split(text) if part]
+
 
 def find_override_signals(message):
-    """Return an OverrideSignal for each pattern found, sentence by sentence."""
+    """Return an OverrideSignal for each pattern found, sentence by sentence.
+
+    Subject and body are checked separately.
+    """
     signals = []
     for location, text in (("subject", message.subject), ("body", message.body)):
-        for sentence in split_sentences(text):
-            lowered = " ".join(sentence.lower().split())
+        for sentence in _sentences(text):
+            lowered = sentence.lower()
             for label, pattern in _COMPILED:
                 if pattern.search(lowered):
                     signals.append(OverrideSignal(label, location, sentence))

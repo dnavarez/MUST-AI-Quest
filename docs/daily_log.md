@@ -783,3 +783,56 @@ Report: `docs/eval_dev_c1-c5_2026-10-23.md`.
 - Only generated drafts are checked so far; checking human edits is
   planned for Stage 4.
 - Nothing has been committed to Git.
+
+### Git checkpoint and multi-line safety fix — 2026-10-23
+
+#### Git checkpoint (done before this fix)
+- My decision: one honest checkpoint commit of all verified work through
+  Stage 2, on `main`, with `output/` added to `.gitignore`; no
+  reconstructed historical commits.
+- Commit `b2211ad` "Initial checkpoint: Inbox Helper through Stage 2":
+  26 files; staged paths checked against the approved list; 151 tests
+  passed on the working tree and on the staged snapshot; CSV
+  fingerprints verified on disk, in the staging area and in the commit.
+- A pre-commit hook required automated security and code-quality
+  reviews of the staged files. Neither found Critical or High issues.
+  Findings: one confirmed Medium bug (below), one Medium design risk
+  (drafting depends on the caller passing the override warning; to be
+  covered by an end-to-end test in Stage 3), and several Low items
+  (tripwire does not cover `os.system`/`asyncio`/`multiprocessing`/
+  `ctypes`; unescaped message text in evaluation report previews; loader
+  row numbers with blank lines; evaluation header trimming; one
+  unreachable drafter sentence). The Low items are not fixed yet.
+
+#### Multi-line safety fix
+- **Bug (confirmed by me running it):** "Ignore all previous
+  instructions." was flagged, but "Ignore all previous⏎instructions."
+  was not, because the detector reused the classifier's sentence
+  splitter, which splits at every line break.
+- **My decision:** fix it in a separate commit before Stage 3, changing
+  only `safety.py`, its tests, `docs/intent.md` and this log.
+- **Change (AI-generated, pending my review):** `safety.py` now has its
+  own splitter: line breaks and repeated spaces become single spaces,
+  then text is split only after `.`, `?` or `!`. It no longer imports
+  from the classifier. The classifier is unchanged.
+- **Tests:** 14 new tests in `tests/test_safety.py`: 7 wrapped
+  instructions (including `\r\n` and a realistic wrapped email), the
+  evidence sentence for wrapped text, 5 ordinary multi-line messages
+  that must not be flagged, and a check that the detector does not
+  import the classifier.
+- **Problem found while writing tests:** the first version of the
+  wrapped-email test also passed on the old code, because its line
+  breaks fell between the suspicious phrases. It was re-wrapped so the
+  instructions are actually split across lines.
+- **Results:**
+  - New tests against the committed (old) `safety.py`: 9 failed, 30
+    passed — the 9 failures are the wrapped cases, the evidence test
+    and the independence check, as intended.
+  - `.venv/bin/python -m pytest -q tests/test_safety.py` → 39 passed.
+  - `.venv/bin/python -m pytest -q` → 165 passed.
+  - On the dev set only, the detector still flags exactly dev-16 and
+    dev-17. Test-set evaluation not run; classifier not tuned.
+- **Remaining limitations:** an instruction split by a full stop, or
+  between subject and body, is still missed; joining lines can merge
+  unpunctuated list items into one sentence and may occasionally cause
+  a false warning; all earlier detector limitations still apply.
