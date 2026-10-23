@@ -836,3 +836,160 @@ Report: `docs/eval_dev_c1-c5_2026-10-23.md`.
   between subject and body, is still missed; joining lines can merge
   unpunctuated list items into one sentence and may occasionally cause
   a false warning; all earlier detector limitations still apply.
+
+### Stage 3 (review files and `draft` command) — 2026-10-23
+
+#### My decisions
+- Approved the Stage 3 plan and four decisions: refuse to overwrite
+  existing review files unless `--overwrite`; protect formula-like CSV
+  cells with `'` (Stage 4 compares against the original input); CSV in
+  input order, UTF-8 with BOM; show invisible characters as `[U+XXXX]`
+  in `review.md` only.
+- Detection rules, classifier, drafter, frozen data and reports must not
+  change; the frozen test evaluation must not be run or inspected.
+
+#### Implemented (AI-generated, pending my review)
+- `src/inbox_helper/review.py` (new): pipeline (`load_messages` →
+  `classify` → `safety_warnings` → `draft_reply` with the warnings passed
+  explicitly), `review.md` rendering with escaping and code blocks,
+  `review.csv` rendering with formula protection, and writing via
+  temporary files with the overwrite rule.
+- `src/inbox_helper/__main__.py` (new):
+  `python -m inbox_helper draft INPUT --out DIR [--overwrite]`; clear
+  errors with exit code 2; summary that says nothing was sent.
+- `tests/test_review.py` (new, 15 tests) and `tests/test_cli.py` (new,
+  13 tests, counting parametrized cases), including the 10-message acceptance test, byte-identical
+  output, invalid input, existing files, escaping, long evidence,
+  invisible characters, formula protection, a dev-set check that dev-16
+  and dev-17 get the fallback and warning, and a real `python -m` run.
+- README, `docs/intent.md`: Stage 3 behavior, limitations, and the
+  documented detector misses (quoted `>` lines, invisible characters,
+  look-alike characters, hyphenated line breaks). No detection rules
+  changed.
+
+#### Problem found and fixed during the stage
+- My first acceptance test searched the whole report for a fake
+  `### Message m99` heading and failed — but that text was correctly
+  inside the code block as message content. The test now checks only
+  lines outside code blocks, like the other escaping tests.
+
+#### Tests and checks run
+- `.venv/bin/python -m pytest -q` → 193 passed (165 earlier + 28 new).
+- Escaping check: in a temporary copy with escaping, the long fence and
+  formula protection deliberately switched off, 6 of the new tests
+  failed — the escaping and CSV tests do detect those failures.
+- `git diff 66c72a6` on classifier, safety, drafter, loader, evaluate,
+  models, their tests, `data/` and the evaluation reports: no changes.
+  Frozen CSV fingerprints a19d0d36… and b74fe9fb… unchanged.
+- My own security/quality review: no Critical or High issues found. The
+  formal reviews required by the pre-commit hook have not been run yet.
+
+#### Limitations
+- The two review files are replaced one after the other; an error in
+  that instant could leave a new `review.md` next to an old
+  `review.csv`. Another program creating the files between the check and
+  the write is not detected.
+- Detector misses (unchanged): quoted `>` lines, invisible characters,
+  look-alike characters, hyphenated line breaks, other wording or
+  languages. Invisible characters are at least visible in `review.md`.
+- Decisions, finalize and sample data are not implemented yet.
+- Nothing has been staged or committed.
+
+### Stage 3 revision before commit — 2026-10-23
+
+#### Formal reviews of the first Stage 3 staging (pre-commit hook)
+- Security review: no Critical, High or Medium findings; Low findings
+  L1–L8 (GitHub-style links/emoji in the sender line, some invisible
+  characters not shown, formula check only on the first character,
+  non-atomic pair replacement, existence-check race and dangling
+  symlinks, `--overwrite` able to destroy decisions incl. when the input
+  is `review.csv`, input read twice, temp file after a hard kill).
+- Code-quality review: no Critical or High; two Medium findings —
+  (1) formula protection changed the `id` column, so `=a` and `'=a`
+  both became `'=a` and `-7` became `'-7`; (2) ids `a b`, `a  b` and
+  `a⏎b` produced the same Markdown heading. Plus Low findings.
+- I (the AI) confirmed Medium 1, Medium 2 and L1 by running them.
+
+#### My decisions
+- Do not commit yet; make a focused revision: preserve ids exactly and
+  reject formula-like ids and ids with line breaks/control characters;
+  unambiguous headings; stronger formula protection for non-id cells;
+  refuse an input that is one of the output files (also with
+  `--overwrite`); show senders safely. Document the other Low findings.
+
+#### What changed (AI-generated, pending my review)
+- `review.py`: `check_ids` (formula-like starts incl. full-width
+  look-alikes; line breaks/control characters; and — the AI's
+  interpretation of "unambiguous", flagged for my review — invisible
+  formatting characters, unusual space characters and two spaces in a
+  row); `code_span` for ids, senders and the input file name; `id`
+  column written unchanged; `protect_cell` checks after stripping
+  leading whitespace and NFKC normalization; input/output overlap check
+  (same path, `..`, links) before anything else.
+- `__main__.py`: reports the new overlap error.
+- Tests: 4 existing tests updated because they checked the old heading
+  format (`### Message m2` → ``### Message `m2` ``); 40 new tests.
+- `docs/intent.md`, `README.md`: new rules and the remaining Low
+  findings listed as known limitations.
+
+#### Problems during the revision
+- Expected: 4 existing tests failed on the new heading format and were
+  updated.
+- My first new id-rejection test compared full error messages against
+  short phrase fragments and failed although the program was right; it
+  now checks the exact start of the message (file, row, id) and that the
+  problem is named.
+
+#### Tests and checks run
+- `.venv/bin/python -m pytest -q` → 233 passed (165 earlier + 46 in
+  `test_review.py` + 22 in `test_cli.py`).
+- New command-line tests against the pre-revision code: 10 failed
+  (including `--overwrite` with `review.csv` as input destroying the
+  decisions), 12 passed. The new `test_review.py` cannot import against
+  the old code (new functions did not exist).
+- Protected files unchanged vs `66c72a6`. Frozen CSV fingerprints
+  unchanged.
+- Nothing committed.
+
+### Stage 3 cleanup (Option 2) — 2026-10-23
+
+#### Formal reviews of the revised staging
+- Security and code-quality reviews: no Critical, High or Medium
+  findings; both earlier Medium findings confirmed fixed. New Low
+  findings: misleading error when an output path is a folder;
+  overstated `check_ids` comment; visually similar Unicode ids still
+  accepted; spreadsheets may reinterpret ids (`001`, `1E3`, dates) —
+  important for Stage 4; a spaces-only sender looks blank; the
+  id-column test could not detect re-introduced prefixing; no `'=a` or
+  symbolic-link test.
+
+#### My decision
+- Option 2: fix the comment, document the limitations, add the `=a`
+  and symbolic-link tests, make the id-column test able to fail, then
+  re-verify and re-review before any commit.
+
+#### What changed (AI-generated, pending my review)
+- `review.py`: `check_ids` comment now states the actual guarantee (ids
+  kept exactly and restricted by the rules; Unicode strings can still
+  look identical). No behavior change.
+- `tests/test_review.py`: replaced the weak id-column test with two
+  tests — valid tricky ids (`'=a`, `001`, `1E3`, `MAR1`, …) unchanged in
+  the CSV, and the CSV writer writing even `=a`, `-7`, `@x` exactly
+  (rejection is `check_ids`' job). Reason: every id that passes
+  validation is one `protect_cell` would not change, so only the second
+  test can detect formula prefixing re-applied to the id column.
+- `tests/test_cli.py`: `=a` added to the invalid-id command tests; new
+  test that a symbolic link pointing to `review.csv` is refused with
+  `--overwrite` and both files stay unchanged (skips only if the
+  platform cannot create symbolic links; on this Mac it ran).
+- `docs/intent.md`: the four limitations added to *Known limitations*;
+  Stage 4 requirement recorded (validate each decision row against the
+  original input, do not trust the id alone). `README.md`: short note.
+
+#### Tests and checks run
+- `.venv/bin/python -m pytest -q -rs` → 236 passed, 0 skipped.
+- Deliberate breakages in temporary copies: re-applying formula
+  prefixing to `id` → `test_csv_writer_never_prefixes_the_id_column`
+  failed; replacing the overlap check with a plain path comparison →
+  the symbolic-link and `..` tests failed.
+- Nothing committed.

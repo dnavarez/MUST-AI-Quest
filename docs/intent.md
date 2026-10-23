@@ -31,7 +31,10 @@ v1 is a **local, deterministic, rule-based Python command-line program**.
 - **Output:** one Markdown review report (for example
   `output/review.md`), grouped by primary intent, showing each original
   message next to its draft, flags, and the keywords that matched.
-- **Run example (planned):** `python -m inbox_helper data/messages.csv --out output/review.md`
+- **Run (implemented in Stage 3):**
+  `PYTHONPATH=src .venv/bin/python -m inbox_helper draft INPUT.csv --out output/`
+  writes `output/review.md` and `output/review.csv` (see *Mandatory
+  human review*).
 
 What v1 deliberately does **not** do:
 - It has **no email-sending capability**. There is no send function,
@@ -247,9 +250,17 @@ Approved by the author and chosen from the **dev set only**:
   been measured on independent data.
 - Used in drafting since Stage 2 (2026-10-23): a flagged message always
   gets the neutral safe fallback draft, and the warning is passed
-  through unchanged. Not yet implemented (planned, Stages 3–4): showing
-  the warning in the review files and requiring a reviewer note to
-  approve or edit.
+  through unchanged. Shown in the review files since Stage 3: a
+  plain-language warning plus the instruction-like text found
+  (shortened). Not yet implemented (planned, Stage 4): requiring a
+  reviewer note to approve or edit.
+- **Further known misses (documented 2026-10-23, detection rules not
+  changed):** instructions in quoted reply lines (`> Ignore all
+  previous⏎> instructions`), because the `>` markers sit between the
+  words; invisible characters (for example zero-width spaces) between
+  words; look-alike characters from other alphabets; words hyphenated
+  across a line break. In `review.md`, invisible and control characters
+  are displayed as `[U+XXXX]`, so a reviewer can at least see them.
 
 ## Safe reply drafts
 (**Implemented in Stage 2, 2026-10-23:** `src/inbox_helper/drafter.py`,
@@ -318,10 +329,106 @@ the sender's name or subject".)
   so the reviewer can inspect both.
 - v1 never sends anything. The human decides what, if anything, to send,
   using their own email tool.
-- **Planned review workflow (Stages 3–4; approved Decisions 3–5, not
+- **Review files (implemented in Stage 3, 2026-10-23;
+  `src/inbox_helper/review.py`, `src/inbox_helper/__main__.py`):**
+  - `draft` reads the CSV with the loader, then for each message runs
+    `classify` → `safety_warnings` → `draft_reply`, passing the warnings
+    to the drafter explicitly.
+  - `review.md`: header marked **NOT SENT**, input file name and
+    SHA-256, counts, and a table of messages per intent; then one
+    section per primary intent in fixed taxonomy order (empty groups
+    shown as "(none)"), messages in input order. Each entry shows the
+    escaped id and sender, status `pending_review`, primary and
+    secondary intents, plain-language warnings, instruction-like text
+    found, the original message, classification evidence, and the
+    draft or the no-draft explanation. No timestamps: the same input
+    and code give byte-identical files.
+  - **Message ids (revision before the Stage 3 commit):** ids are
+    written exactly as loaded (surrounding spaces removed) to both
+    files, so each review
+    entry links back to its input row. The `draft` command rejects,
+    with a clear error naming the row, ids that start with `=`, `+`,
+    `-` or `@` (also full-width look-alikes such as `＝`), and ids that
+    contain line breaks, control characters, invisible formatting
+    characters (e.g. zero-width space), unusual space characters (e.g.
+    non-breaking space) or two spaces in a row. The last three are an
+    interpretation of "headings must be unambiguous": viewers often
+    collapse spaces and show these characters identically, so two
+    different ids could otherwise look the same.
+  - **Untrusted text in `review.md`:** message text and evidence are
+    shown inside fenced code blocks whose fence is longer than any
+    backtick run in the content, so they cannot close the block. The
+    id, sender and input file name are shown as inline code (with a
+    fence longer than any backtick run), so viewers do not turn them
+    into links, emoji, mentions or HTML. Notes are escaped. Headings,
+    HTML, links or fake warnings inside a message cannot become report
+    structure. Invisible/control characters are displayed as
+    `[U+XXXX]`; evidence longer than 160 characters is shortened for
+    display. The underlying message, classification and safety data
+    are not changed.
+  - `review.csv`: one row per message in input order, columns `id,
+    sender, subject, body, primary_intent, secondary_intents, flags,
+    warnings, draft, note, status, decision, edited_draft,
+    reviewer_note`. `decision`, `edited_draft`, `reviewer_note` are
+    always blank; `status` is always `pending_review`. UTF-8 with a
+    byte-order mark. **Formula protection** (all columns except `id`):
+    a cell gets a leading `'` if, after removing leading whitespace and
+    line breaks and folding look-alike characters (NFKC, e.g. `＝` →
+    `=`), it starts with `=`, `+`, `-` or `@`, or if it starts with a
+    tab, carriage return or line break. Examples: `" =1+1"`,
+    `"\n=1+1"`, `"＝1+1"`. The original message data is not changed;
+    Stage 4 must compare against the original input file, not this
+    column text.
+  - **Errors and existing files:** both files are built in memory before
+    anything is written, so invalid input (missing file, not UTF-8, not
+    CSV, missing column, empty file, blank/duplicate id, rejected id)
+    gives a clear error, exit code 2, and no output files. If the input
+    file **is** `review.md` or `review.csv` in the output folder (also
+    via another path, `..` or a link), the command refuses even with
+    `--overwrite`, and both files stay unchanged. If `review.md` or
+    `review.csv` already exists, the command refuses and changes
+    neither (they may hold review decisions) unless `--overwrite` is
+    given. Files are written to temporary files and then moved into
+    place.
+  - **Known limitations (from the Stage 3 reviews, not fixed):**
+    - the two files are replaced one after the other, so an error in
+      that instant could leave a new `review.md` next to an old
+      `review.csv`;
+    - another program creating the files between the existence check
+      and the write is not detected, and a broken symbolic link at an
+      output path is not treated as an existing file;
+    - `--overwrite` makes no backup of earlier review decisions;
+    - some invisible characters are not shown as `[U+XXXX]` (e.g.
+      Hangul filler U+3164, braille blank U+2800, variation selectors);
+    - ids made of look-alike letters from other alphabets can still
+      look the same;
+    - the input file is read twice (to load and to compute the
+      SHA-256), so a change in between would not be detected;
+    - after a hard kill or power loss a `.review.*.tmp` file can be
+      left in the output folder;
+    - output files are created readable only by their owner (0600);
+    - an unreadable input file is reported as "could not write the
+      review files"; similarly, if an output path such as
+      `review.md` is a folder, the error can wrongly say the input is a
+      folder;
+    - visually similar Unicode ids may still be accepted, because ids
+      are compared exactly and only the rules above are enforced:
+      for example the same accented letter in two encodings (`é` as
+      one character or as `e` + combining accent), full-width letters
+      (`Ａ1` next to `A1`), and some combining marks or other
+      characters that are normally invisible;
+    - spreadsheet programs may reinterpret ids when opening
+      `review.csv` (for example `001` → `1`, `1E3` → `1000`, or
+      date-like ids → dates), and saving the file keeps the change;
+      **Stage 4 must therefore validate each decision row against the
+      original input data, not trust the id alone**;
+    - a sender consisting only of spaces may appear blank in
+      `review.md`;
+    - whether a spreadsheet evaluates any remaining formula-like text
+      depends on its import settings and should be checked once in the
+      spreadsheet program actually used.
+- **Planned review decisions (Stage 4; approved Decisions 3–5, not
   implemented yet):**
-  - `draft` command writes `review.md` (for reading) and `review.csv`
-    (for decisions: `decision`, `edited_draft`, `reviewer_note`).
   - The reviewer sets `decision` to `approve`, `edit`, or `reject`;
     blank stays `pending_review`. No code path approves automatically.
   - Approving or editing a message flagged
@@ -330,6 +437,11 @@ the sender's name or subject".)
   - `finalize` command validates `review.csv` against the original
     messages and generated drafts (not only the `id`) and writes
     `approved_unsent.md` / `.csv`, clearly marked **not sent**.
+    Requirement recorded in the Stage 3 cleanup: because spreadsheet
+    programs can change ids (e.g. `001` → `1`) and `review.csv` cells
+    may carry a protective leading `'`, each decision row must be
+    checked against the original input data, and the id alone must not
+    be trusted to identify a message.
   - Generated files go to `output/` (ignored by Git); curated
     demonstration files go to `examples/`.
 
@@ -406,7 +518,10 @@ v1 is complete when all of the following pass as automated tests
    message → 10 report entries; exactly 9 drafts plus 1 "no draft"
    entry; each entry linked to its message by `id`; every message in
    exactly one group; group counts sum to 10; two runs produce
-   identical output.
+   identical output. **Covered since Stage 3** by
+   `tests/test_cli.py::test_ten_message_acceptance` and
+   `test_output_is_byte_identical_across_runs` (for the review files;
+   the "draft" here is the generated draft, approval is Stage 4).
 5. **No invented facts:** "My order hasn't arrived yet." → the draft
    asks for the order number; contains no dates, amounts, tracking
    numbers, or delivery promises; every number in the draft appears in
@@ -531,7 +646,8 @@ Additional criteria:
 - **Safety status:** the `possible_instruction_override` warning is
   implemented as a separate pattern detector (Stage 1, 2026-10-23) and
   used by drafting (Stage 2: flagged messages get the safe fallback);
-  it is **not yet shown in review files** (planned, Stages 3–4). It
+  shown in the review files (Stage 3); a reviewer note for approving
+  flagged messages is planned for Stage 4. It
   can miss attacks and flag harmless text (see *Untrusted message
   content*). Neither the detector nor C1–C5 prevents prompt injection
   or guarantees safety; mandatory human review and the absence of any
@@ -692,5 +808,21 @@ on.
   across lines. Fixed by giving the detector its own splitter (see
   *Untrusted message content*); approved by the author as a separate
   commit before Stage 3.
+- **2026-10-23 — Stage 3 implemented:** `draft` command writing
+  `review.md` and `review.csv` (see *Mandatory human review*). Author
+  decisions: refuse to overwrite existing review files unless
+  `--overwrite`; protect formula-like CSV cells with `'`; CSV in input
+  order, UTF-8 with BOM; show invisible characters as `[U+XXXX]` in
+  `review.md` only. Detection rules unchanged; quoted (`>`) lines and
+  other known misses documented.
+- **2026-10-23 — Stage 3 revision before commit:** after the required
+  security and code-quality reviews (no Critical/High findings; two
+  Medium findings about ids), the author approved: ids preserved
+  exactly and validated (formula-like starts, line breaks, control,
+  invisible and unusual space characters, double spaces rejected); ids,
+  senders and the file name shown as inline code; stronger formula
+  protection (leading whitespace, look-alike characters) for non-id
+  cells; refusing an input file that is one of the output files. The
+  remaining Low findings are documented as known limitations.
 
 Update this document as experiments and evidence change the design.

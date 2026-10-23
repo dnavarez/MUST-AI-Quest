@@ -6,8 +6,9 @@ See `docs/intent.md` for the full design.
 
 ## Current status
 
-Implemented so far (as Python modules; there is no command-line
-program yet):
+Implemented so far:
+- the `draft` command, which writes `review.md` (to read) and
+  `review.csv` (for decisions) — see *Drafting replies for review*;
 - loading and validating a CSV file of messages (`loader.py`);
 - rule-based intent classification (`classifier.py`) and an evaluation
   script (`evaluate.py`);
@@ -18,8 +19,8 @@ program yet):
   messages with the override warning, and no draft for empty messages.
   Every draft is `pending_review`; nothing is ever sent.
 
-**Not implemented yet:** the review files (`review.md`, `review.csv`),
-review decisions and the `finalize` step, and the command-line program.
+**Not implemented yet:** recording review decisions and the `finalize`
+step (Stage 4), and sample data with worked examples (Stage 5).
 
 The override detector is simple pattern matching: it can miss attacks
 and can flag harmless text, so a warning only means "review carefully".
@@ -50,6 +51,45 @@ A UTF-8 CSV file with a header row containing these columns:
 
 Extra columns are ignored. An empty file, or a file missing any of the
 four columns, is rejected with an error that says what is wrong.
+
+## Drafting replies for review
+
+From the project folder:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m inbox_helper draft path/to/messages.csv --out output/
+```
+
+This writes two files and **sends nothing**:
+
+- `output/review.md` — for reading. Messages grouped by intent, each
+  with its warnings, the original text (shown as plain text), the
+  keywords that matched, and the suggested draft or why there is none.
+- `output/review.csv` — for decisions. One row per message with blank
+  `decision`, `edited_draft` and `reviewer_note` columns. (Recording
+  decisions and the `finalize` step are not implemented yet.)
+
+Every draft has status `pending_review`. If `review.md` or `review.csv`
+already exists in the output folder, the command stops without changing
+them, because they may contain your review work; add `--overwrite` only
+if you want to replace them. Invalid input stops with an error and
+writes nothing. The `output/` folder is ignored by Git.
+
+Message text is untrusted: in `review.md` it is always shown inside
+code blocks (ids and senders as inline code), and in `review.csv`
+cells that a spreadsheet could treat as a formula start with `'` —
+except the `id` column, which is always written exactly as loaded
+(surrounding spaces removed). The command also refuses to run when the input file is one of
+the output files, even with `--overwrite`.
+
+Message ids must not start with `=`, `+`, `-` or `@`, and must not
+contain line breaks, control or invisible characters, unusual space
+characters, or two spaces in a row; otherwise the command stops with
+an error naming the row. Different ids can still look alike (for
+example accented or full-width letters), and a spreadsheet program may
+change ids such as `001` or `1E3` when opening `review.csv`, so check
+ids carefully. See *Known limitations* under *Mandatory human review*
+in `docs/intent.md`.
 
 ## Running the tests
 
