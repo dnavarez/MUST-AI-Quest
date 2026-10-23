@@ -1,0 +1,8 @@
+# Local Python environment and generated files
+.venv/
+__pycache__/
+.pytest_cache/
+output/
+
+# macOS folder metadata
+.DS_Store
