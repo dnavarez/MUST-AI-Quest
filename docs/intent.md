@@ -1,8 +1,15 @@
 # Intent — Inbox Helper
 
-> **Status (2026-10-23):** Design approved for v1. Nothing described
-> below is implemented or tested yet. This document describes intended
-> behavior, not current behavior.
+> **Status (2026-10-24):** Design approved for v1. **Implemented and
+> tested:** keyword classification, the instruction-override warning,
+> template reply drafts, the `draft` command writing `review.md` and
+> `review.csv` (Stage 3), and checking a completed `review.csv` against
+> the input (`finalize.validate_review`, Stage 4a; it only reads files).
+> **Planned, not implemented yet:** writing the approved replies
+> (`approved_unsent.csv` / `.md`, Stage 4b), the `finalize` command,
+> and sample data with worked examples (Stage 5). The tool never sends
+> messages and has no sending capability. Sections below say which parts
+> are implemented and which are planned.
 
 ## Problem
 When someone has a pile of incoming messages, it takes time to
@@ -252,8 +259,10 @@ Approved by the author and chosen from the **dev set only**:
   gets the neutral safe fallback draft, and the warning is passed
   through unchanged. Shown in the review files since Stage 3: a
   plain-language warning plus the instruction-like text found
-  (shortened). Not yet implemented (planned, Stage 4): requiring a
-  reviewer note to approve or edit.
+  (shortened). Since Stage 4a (2026-10-24), a reviewer note is
+  required to approve or edit a flagged message when a review file is
+  validated (`finalize.validate_review`); writing approved replies is
+  planned for Stage 4b.
 - **Further known misses (documented 2026-10-23, detection rules not
   changed):** instructions in quoted reply lines (`> Ignore all
   previous⏎> instructions`), because the `>` markers sit between the
@@ -315,7 +324,7 @@ the sender's name or subject".)
 - **Limitations:** the guards are word lists and patterns; they can
   miss a commitment phrased differently (for example "you'll get your
   money back") and they only check generated text — human edits are
-  checked in Stage 4 (planned). Templates are generic and may not fit
+  checked in Stage 4b (planned). Templates are generic and may not fit
   every message, especially when the predicted intent is wrong. The
   complaint template's "I am sorry to hear about your experience" is
   sympathy, not an admission, but a reviewer should confirm it fits.
@@ -378,7 +387,8 @@ the sender's name or subject".)
     tab, carriage return or line break. Examples: `" =1+1"`,
     `"\n=1+1"`, `"＝1+1"`. The original message data is not changed;
     Stage 4 must compare against the original input file, not this
-    column text.
+    column text (done in Stage 4a; see *Review decisions —
+    validation*).
   - **Errors and existing files:** both files are built in memory before
     anything is written, so invalid input (missing file, not UTF-8, not
     CSV, missing column, empty file, blank/duplicate id, rejected id)
@@ -421,27 +431,128 @@ the sender's name or subject".)
       `review.csv` (for example `001` → `1`, `1E3` → `1000`, or
       date-like ids → dates), and saving the file keeps the change;
       **Stage 4 must therefore validate each decision row against the
-      original input data, not trust the id alone**;
+      original input data, not trust the id alone** (done in Stage 4a;
+      see *Review decisions — validation*);
     - a sender consisting only of spaces may appear blank in
       `review.md`;
     - whether a spreadsheet evaluates any remaining formula-like text
       depends on its import settings and should be checked once in the
       spreadsheet program actually used.
-- **Planned review decisions (Stage 4; approved Decisions 3–5, not
-  implemented yet):**
-  - The reviewer sets `decision` to `approve`, `edit`, or `reject`;
-    blank stays `pending_review`. No code path approves automatically.
-  - Approving or editing a message flagged
-    `possible_instruction_override` requires a non-empty
-    `reviewer_note`; the warning stays visible in the review output.
-  - `finalize` command validates `review.csv` against the original
-    messages and generated drafts (not only the `id`) and writes
-    `approved_unsent.md` / `.csv`, clearly marked **not sent**.
-    Requirement recorded in the Stage 3 cleanup: because spreadsheet
-    programs can change ids (e.g. `001` → `1`) and `review.csv` cells
-    may carry a protective leading `'`, each decision row must be
-    checked against the original input data, and the id alone must not
-    be trusted to identify a message.
+- **Review decisions — validation (implemented in Stage 4a, 2026-10-24;
+  `src/inbox_helper/finalize.py`, `tests/test_finalize.py`):**
+  `validate_review(input_path, review_path)` checks a completed
+  `review.csv` against the original input file and returns each
+  message's checked decision in input order. It only reads files: it
+  writes nothing, sends nothing, and has no command yet. Any problem
+  with the review file raises `ReviewFileError` listing the problems
+  (at most 50 shown, then "… and N more"); problems reading the input
+  file come from the existing loader and id checks (`MessageFileError`,
+  file and decoding errors).
+  - **Source of truth:** the input file is loaded and checked with the
+    loader and `check_ids`, and every entry and AI draft is rebuilt with
+    the Stage 3 pipeline. The review file's `draft` cell is never
+    trusted as the AI draft.
+  - **Strict reader:** UTF-8 with or without byte-order mark; strict CSV
+    parsing; header names trimmed, then exactly the 14 review columns
+    (any order), no duplicates, no unknown columns; a hint for
+    `;`-separated files; extra cells in a row are an error, missing
+    trailing cells count as blank; blank rows at the end are ignored, a
+    blank row in between or a blank first row is an error.
+  - **Matching:** rows are matched by exact id (sorting is fine; ids are
+    not trimmed, case-folded or normalized). Blank, duplicate, unknown
+    and missing ids are errors. Ids are never repaired: for an unknown
+    id the tool only explains what probably happened (extra spaces, or
+    sender/subject/body matching exactly one unmatched message, e.g.
+    `001` → `1`), and it never suggests an id that another row already
+    has.
+  - **Content check before any decision:** the generated cells `sender`
+    to `note` must still match the rebuilt values, and `status` must be
+    exactly `pending_review`. Allowed differences, for content only: the
+    protective `'` added by `protect_cell` may be kept or dropped, CRLF
+    may become LF, and Unicode NFC. No trimming, no case-folding, no
+    other apostrophes removed. Swapped ids, edits in the `draft` cell
+    and stale review files are refused.
+  - **Decisions:** `approve`, `edit`, `reject` or blank (pending),
+    ignoring case and surrounding spaces only; anything else is refused.
+    Blank, `approve` and `reject` need a blank `edited_draft`. `approve`
+    needs an AI draft and uses the rebuilt draft as the final reply.
+    `edit` needs meaningful text, which is kept exactly as written
+    apart from CRLF → LF, even if it equals the AI draft. Empty messages
+    (no draft) can only be rejected or left pending. A message with the
+    `possible_instruction_override` warning needs a meaningful
+    `reviewer_note` to be approved or edited; the note is not proof the
+    reply is safe. "Meaningful" means at least one visible letter,
+    digit, punctuation mark or symbol: spaces, invisible formatting
+    characters, lone combining marks, private-use characters, Hangul
+    fillers and the blank braille pattern do not count. Spreadsheet
+    error values (`#NAME?`, `#VALUE!`, `Err:502`, …) are refused in
+    `edited_draft` and `reviewer_note`.
+  - **Safety checks:** the input and review file must not be the same
+    file (also via `..` or links), and an input file with review-only
+    columns (`primary_intent`, `secondary_intents`, `draft`, `status`,
+    `decision`, `edited_draft`, `reviewer_note`, ignoring case) is
+    refused as a probable review file, with a hint to rename or remove
+    such columns.
+  - **Safe diagnostics:** errors name rows, ids and columns. Header text
+    is never shown (unknown columns are given by position). Ids and
+    decisions from the review file are shown only if they look like a
+    short code (ids: one word of up to 20 letters, digits or simple
+    punctuation with at most 7 digits in total; decisions: up to 12
+    ASCII letters); otherwise only their length is shown. Ids from the
+    input file are shown escaped.
+  - **Known limitations (Stage 4a):**
+    - a short value pasted from a message into an id or decision cell
+      (for example a 7-digit local phone number) can still appear in an
+      error message;
+    - some rare characters that look blank (for example U+1D159) still
+      count as meaningful text;
+    - an input file whose review-only columns were renamed with
+      look-alike or invisible characters, or deleted, is not recognized
+      as a review file; only binding the review file to its input (for
+      example by the input's SHA-256) would detect this, which is
+      deferred to Stage 4b;
+    - the hints for unknown ids and swapped rows compare every such row
+      with every message, so a large file where every id was changed
+      can take seconds to minutes to report;
+    - a decision containing an invisible character (e.g. `approve` plus
+      a zero-width space) is refused with a generic "(N characters, not
+      shown)" message that does not say why;
+    - an input file with an ordinary `status`, `draft` or `decision`
+      column is refused even though `draft` accepts it;
+    - whether a spreadsheet program keeps or drops the protective `'`
+      when saving has not been checked in a real spreadsheet program;
+      both forms are accepted;
+    - a reviewer note made only of punctuation (for example `.`)
+      counts as meaningful, so it satisfies the note requirement for
+      an override-flagged message;
+    - edited replies and notes are kept as written, including
+      text that starts like a spreadsheet formula (for example
+      `=HYPERLINK(...)`). Nothing is written in Stage 4a; Stage 4b must
+      apply `protect_cell` to every cell of the output CSV and show
+      such text safely in the Markdown output (requirement for future
+      output, not current behavior).
+- **Planned review output (Stage 4b and the command, not implemented
+  yet):**
+  - A `finalize` command
+    (`python -m inbox_helper finalize INPUT --review REVIEW_CSV --out DIR [--overwrite]`)
+    will use `validate_review` and write `approved_unsent.csv` and
+    `approved_unsent.md`, clearly marked **not sent**, containing only
+    approved and edited messages, with counts for all decisions. CSV
+    columns: `id, sender, subject, body, primary_intent, warnings,
+    decision, ai_draft, edited_draft, final_reply, reply_warnings,
+    reviewer_note, status` (status `approved_unsent`); `warnings` uses
+    the combined warnings shown in `review.md`.
+  - `reply_warnings` will flag unresolved placeholders and non-blocking
+    draft-check warnings from `drafter.check_draft` for edited replies
+    (commitment wording, currency, numbers or dates not in the message,
+    more than 100 words), never refusing a reply. A placeholder is any
+    placeholder used in the drafter's templates, or square brackets
+    holding an upper-case word of three or more letters, optionally
+    with more upper-case words and a description after a comma or colon
+    (`[DATE]`, `[DETAILS NEEDED]`); `[OK]`, `[sic]`, `[1]`, `[e.g.]` are
+    not placeholders.
+  - Binding the review file to its input (SHA-256) is to be decided in
+    Stage 4b.
   - Generated files go to `output/` (ignored by Git); curated
     demonstration files go to `examples/`.
 
@@ -646,8 +757,9 @@ Additional criteria:
 - **Safety status:** the `possible_instruction_override` warning is
   implemented as a separate pattern detector (Stage 1, 2026-10-23) and
   used by drafting (Stage 2: flagged messages get the safe fallback);
-  shown in the review files (Stage 3); a reviewer note for approving
-  flagged messages is planned for Stage 4. It
+  shown in the review files (Stage 3); a reviewer note is required to
+  approve or edit a flagged message when a review file is validated
+  (Stage 4a; writing approved replies is planned for Stage 4b). It
   can miss attacks and flag harmless text (see *Untrusted message
   content*). Neither the detector nor C1–C5 prevents prompt injection
   or guarantees safety; mandatory human review and the absence of any
@@ -824,5 +936,19 @@ on.
   protection (leading whitespace, look-alike characters) for non-id
   cells; refusing an input file that is one of the output files. The
   remaining Low findings are documented as known limitations.
+- **2026-10-24 — Stage 4a implemented (validation only):**
+  `finalize.validate_review` checks a completed `review.csv` against the
+  input (see *Mandatory human review*). Author decisions: decisions
+  `approve`/`edit`/`reject`/blank, case and surrounding spaces ignored;
+  empty messages can only be rejected or left pending; exact ids, never
+  repaired; content compared with only the apostrophe, CRLF/LF and NFC
+  differences allowed; an edit equal to the AI draft stays an edit;
+  blank rows only allowed at the end; untrusted ids hidden when they
+  contain 8 or more digits; reply warnings (placeholders and
+  `check_draft`) and the `reply_warnings` column planned for Stage 4b.
+  Five rounds of security and code-quality reviews before the commit
+  gate: none found a Critical or High issue; the one Medium finding
+  (header errors could show message text) was fixed; the remaining Low
+  findings are documented as known limitations.
 
 Update this document as experiments and evidence change the design.

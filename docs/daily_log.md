@@ -993,3 +993,102 @@ Report: `docs/eval_dev_c1-c5_2026-10-23.md`.
   failed; replacing the overlap check with a plain path comparison →
   the symbolic-link and `..` tests failed.
 - Nothing committed.
+
+### Stage 4a (review-file validation) — 2026-10-24
+
+#### My decisions
+- Approved the Stage 4 design and a Stage 4a scope of validation only:
+  new `finalize.py` and `test_finalize.py`; no command, no output files,
+  no changes to Stage 3 code, frozen data or evaluation.
+- Decisions: `approve`, `edit`, `reject` or blank (pending), ignoring
+  case and surrounding spaces only; empty messages may only be rejected
+  or left pending; an edit equal to the AI draft stays an edit; exact
+  ids, never repaired; content compared allowing only the protective
+  apostrophe, CRLF/LF and NFC; blank rows allowed only at the end.
+- Placeholder rule, `reply_warnings` column and reuse of
+  `drafter.check_draft` as non-blocking warnings approved for Stage 4b.
+- After the reviews: header text never shown; untrusted ids and
+  decisions shown only if they look like short codes; untrusted ids
+  hidden when they contain 8 or more digits in total (chosen over 9 so
+  that `acct:12345678` is hidden); a copy of a review file refused as
+  input; invisible-only text does not count as a note or an edit.
+
+#### Implemented (AI-generated, pending my review)
+- `src/inbox_helper/finalize.py` (new): `validate_review(input_path,
+  review_path)` rebuilds every entry from the input with the Stage 3
+  pipeline, reads `review.csv` with a strict reader, matches rows by
+  exact id, checks the generated cells before any decision, checks the
+  decision rules (including the reviewer note for override-flagged
+  messages), and raises `ReviewFileError` listing the problems (at most
+  50 shown). It only reads files; nothing is written or sent.
+- `tests/test_finalize.py` (new, 224 tests counting parametrized
+  cases), using synthetic messages only.
+- `docs/intent.md`: Stage 4a behavior, known limitations and the
+  planned Stage 4b output.
+
+#### Problems found and fixed during the stage
+- Some of my first tests built CSV rows by splitting text on line
+  breaks, which broke draft cells containing newlines; they now use the
+  CSV writer. One swapped-id test expected the two ids the wrong way
+  round; the module was right.
+- While fixing a review finding I briefly moved the check that skips
+  the decision when the content does not match; I noticed it before
+  running anything and restored it. A test now fails if that happens.
+- My file-writing tools twice put invisible Unicode characters
+  literally into the files (once in the tests, once in `finalize.py`);
+  both files are now plain ASCII with `\u` escapes.
+
+#### Formal reviews (security and code quality, five rounds)
+- No round found a Critical or High issue.
+- Round 1: one Medium finding (a missing header row made error messages
+  show message text), plus Low findings (a review file accepted as
+  input, confusing empty column names, misleading hints, invisible
+  Unicode in tests, column drift test missing). All fixed.
+- Rounds 2–5: Low findings only (short values shown in errors,
+  case-changed review columns, duplicate id hints, invisible-only notes
+  and edits, blank first line, digits written with separators, real
+  input ids hidden in duplicate messages). Fixed as approved; the rest
+  are documented as limitations.
+- One reviewer once ran the full test suite including the evaluation
+  test files. That run probably read the frozen evaluation data
+  through those tests; the data was not modified and its fingerprints
+  stayed unchanged. From then on the suite is run without
+  `test_eval_dataset.py` and `test_evaluate.py`.
+
+#### Tests and checks run
+- `.venv/bin/python -m pytest -q -rs tests/test_finalize.py` → 224
+  passed, 0 skipped.
+- Suite without the evaluation test files
+  (`--ignore=tests/test_eval_dataset.py --ignore=tests/test_evaluate.py`)
+  → 444 passed, 0 skipped.
+- Deliberate breakages in temporary copies (removing the content check,
+  the override-note rule, exact-id matching, the header guard, the
+  digit rule and others) each made specific tests fail.
+- Existing source, test and data files unchanged against `d9b0bf2`;
+  the only changes are the two new files (`finalize.py`,
+  `test_finalize.py`) and the two documentation files; frozen CSV fingerprints
+  a19d0d36… and b74fe9fb… unchanged (checked by hash only).
+
+#### Limitations
+- Short values pasted from a message into an id or decision cell can
+  still appear in an error message.
+- Some rare blank-looking characters (e.g. U+1D159) count as text.
+- Review-only columns renamed with look-alike or invisible characters,
+  or deleted, are not detected; binding the review file to its input
+  (SHA-256) is deferred to Stage 4b.
+- Hints for unknown or swapped ids can be slow on large files where
+  every id was changed.
+- A decision containing a zero-width character gets an unhelpful
+  "(N characters, not shown)" message.
+- An input file with an ordinary `status`, `draft` or `decision` column
+  is refused.
+- The protective `'` round trip has not been checked in a real
+  spreadsheet program.
+- A reviewer note made only of punctuation (e.g. `.`) counts as
+  meaningful for an override-flagged message.
+- Edited replies that start like a formula are kept as written;
+  Stage 4b must protect every output CSV cell with `protect_cell` and
+  show such text safely in Markdown (future requirement).
+- No command and no output files yet (Stage 4b and the command).
+- At the time this entry was written, the changes were staged but not
+  committed; the commit status is recorded in Git history.
