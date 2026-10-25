@@ -23,13 +23,9 @@ reading the input file itself come from the existing loader instead
 (MessageFileError, or file and decoding errors). Error messages name rows,
 ids and columns, never message text.
 
-Planned for Stage 4b (not implemented here): unresolved placeholders in a
-final reply will be reported as a warning, never a refusal. A placeholder is
-any placeholder used in the drafter's templates, or square brackets holding
-an upper-case word of three or more letters, optionally followed by more
-upper-case words and then a comma or colon with a description, e.g. [DATE],
-[DETAILS NEEDED], [ANSWER OR NEXT STEP]. [OK], [sic], [1] and [e.g.] are not
-placeholders.
+The finalized output (approved_unsent.csv and .md, including warnings about
+unresolved placeholders) is built in final_output.py and written by
+finalize_files.py.
 """
 
 import csv

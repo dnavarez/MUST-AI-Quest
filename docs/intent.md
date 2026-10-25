@@ -1,15 +1,16 @@
 # Intent — Inbox Helper
 
-> **Status (2026-10-24):** Design approved for v1. **Implemented and
+> **Status (2026-10-25):** Design approved for v1. **Implemented and
 > tested:** keyword classification, the instruction-override warning,
-> template reply drafts, the `draft` command writing `review.md` and
-> `review.csv` (Stage 3), and checking a completed `review.csv` against
-> the input (`finalize.validate_review`, Stage 4a; it only reads files).
-> **Planned, not implemented yet:** writing the approved replies
-> (`approved_unsent.csv` / `.md`, Stage 4b), the `finalize` command,
-> and sample data with worked examples (Stage 5). The tool never sends
-> messages and has no sending capability. Sections below say which parts
-> are implemented and which are planned.
+> template reply drafts, the `draft` command writing `review.md`,
+> `review.csv` and `review.manifest.json` (Stages 3 and 4b-2), checking
+> a completed `review.csv` against the input (Stage 4a) and against the
+> input's fingerprint (Stage 4b-2), and the `finalize` command writing
+> the approved replies to `approved_unsent.md` and `approved_unsent.csv`,
+> marked not sent (Stages 4b-1, 4b-3 and 4b-4). **Planned, not
+> implemented yet:** sample data with worked examples (Stage 5). The
+> tool never sends messages and has no sending capability. Sections
+> below say which parts are implemented and which are planned.
 
 ## Problem
 When someone has a pile of incoming messages, it takes time to
@@ -261,8 +262,8 @@ Approved by the author and chosen from the **dev set only**:
   plain-language warning plus the instruction-like text found
   (shortened). Since Stage 4a (2026-10-24), a reviewer note is
   required to approve or edit a flagged message when a review file is
-  validated (`finalize.validate_review`); writing approved replies is
-  planned for Stage 4b.
+  validated (`finalize.validate_review`); since Stage 4b (2026-10-25)
+  the `finalize` command writes the checked replies, marked not sent.
 - **Further known misses (documented 2026-10-23, detection rules not
   changed):** instructions in quoted reply lines (`> Ignore all
   previous⏎> instructions`), because the `>` markers sit between the
@@ -323,8 +324,9 @@ the sender's name or subject".)
   `draft_guard_triggered`. Every draft has status `pending_review`.
 - **Limitations:** the guards are word lists and patterns; they can
   miss a commitment phrased differently (for example "you'll get your
-  money back") and they only check generated text — human edits are
-  checked in Stage 4b (planned). Templates are generic and may not fit
+  money back") and they only check generated text. Edited replies get
+  the same checks as non-blocking `reply_warnings` in the finalized
+  output (Stage 4b-1); they never block a reply. Templates are generic and may not fit
   every message, especially when the predicted intent is wrong. The
   complaint template's "I am sorry to hear about your experience" is
   sympathy, not an admission, but a reviewer should confirm it fits.
@@ -389,38 +391,53 @@ the sender's name or subject".)
     Stage 4 must compare against the original input file, not this
     column text (done in Stage 4a; see *Review decisions —
     validation*).
-  - **Errors and existing files:** both files are built in memory before
-    anything is written, so invalid input (missing file, not UTF-8, not
-    CSV, missing column, empty file, blank/duplicate id, rejected id)
-    gives a clear error, exit code 2, and no output files. If the input
-    file **is** `review.md` or `review.csv` in the output folder (also
-    via another path, `..` or a link), the command refuses even with
-    `--overwrite`, and both files stay unchanged. If `review.md` or
-    `review.csv` already exists, the command refuses and changes
-    neither (they may hold review decisions) unless `--overwrite` is
-    given. Files are written to temporary files and then moved into
-    place.
+  - **`review.manifest.json` (Stage 4b-2):** `draft` also writes the
+    input file's name and SHA-256 next to the review files, so
+    `finalize` can check that a review is used with the exact input it
+    was made from (see *Finalized output*). The input is hashed before
+    and after it is loaded, and a change in between is refused. Input
+    file names with control, invisible or invalid characters, or longer
+    than 255 characters, are refused, because the name is recorded.
+  - **Errors and existing files:** all three files are built in memory
+    before anything is written, so invalid input (missing file, not
+    UTF-8, not CSV, missing column, empty file, blank/duplicate id,
+    rejected id) gives a clear error, exit code 2, and no output files.
+    If the input file **is** one of the three output files (also via
+    another path, `..` or a link), the command refuses even with
+    `--overwrite`, and the files stay unchanged. If any of the three
+    already exists (since Stage 4b-2 a broken symbolic link counts too),
+    the command refuses and changes none of them (they may hold review
+    decisions) unless `--overwrite` is given. Files are written to
+    temporary files and then moved into place: with `--overwrite` the
+    old manifest is removed first, and the new manifest is moved in
+    last.
   - **Known limitations (from the Stage 3 reviews, not fixed):**
-    - the two files are replaced one after the other, so an error in
-      that instant could leave a new `review.md` next to an old
-      `review.csv`;
+    - the files are replaced one after the other, so an error in that
+      instant could leave a new `review.md` next to an old `review.csv`;
+      since Stage 4b-2 such a folder has no manifest, so `finalize`
+      refuses it unless `--allow-unbound` is given (and the row-by-row
+      check still applies);
     - another program creating the files between the existence check
-      and the write is not detected, and a broken symbolic link at an
-      output path is not treated as an existing file;
+      and the write is not detected;
     - `--overwrite` makes no backup of earlier review decisions;
     - some invisible characters are not shown as `[U+XXXX]` (e.g.
       Hangul filler U+3164, braille blank U+2800, variation selectors);
     - ids made of look-alike letters from other alphabets can still
       look the same;
-    - the input file is read twice (to load and to compute the
-      SHA-256), so a change in between would not be detected;
+    - the input file is read more than once; since Stage 4b-2 a change
+      between the reads is refused, but a change that is reverted in
+      between (A→B→A) is not detected;
     - after a hard kill or power loss a `.review.*.tmp` file can be
       left in the output folder;
     - output files are created readable only by their owner (0600);
     - an unreadable input file is reported as "could not write the
       review files"; similarly, if an output path such as
       `review.md` is a folder, the error can wrongly say the input is a
-      folder;
+      folder (still true for `draft`, tracked separately; `finalize`
+      attributes these errors by the file they name);
+    - if removing a temporary file fails while `draft` handles another
+      write error, the cleanup error can replace the original one
+      (`review._write_files`; tracked separately);
     - visually similar Unicode ids may still be accepted, because ids
       are compared exactly and only the rules above are enforced:
       for example the same accented letter in two encodings (`é` as
@@ -508,9 +525,9 @@ the sender's name or subject".)
       count as meaningful text;
     - an input file whose review-only columns were renamed with
       look-alike or invisible characters, or deleted, is not recognized
-      as a review file; only binding the review file to its input (for
-      example by the input's SHA-256) would detect this, which is
-      deferred to Stage 4b;
+      as a review file; since Stage 4b-2 `finalize` refuses such a copy
+      as a fingerprint mismatch when the review folder has a manifest
+      (not when the manifest is missing and `--allow-unbound` is given);
     - the hints for unknown ids and swapped rows compare every such row
       with every message, so a large file where every id was changed
       can take seconds to minutes to report;
@@ -528,34 +545,109 @@ the sender's name or subject".)
     - edited replies and notes are kept as written (apart from CRLF →
       LF line endings), including
       text that starts like a spreadsheet formula (for example
-      `=HYPERLINK(...)`). Nothing is written in Stage 4a; Stage 4b must
-      apply `protect_cell` to every cell of the output CSV and show
-      such text safely in the Markdown output (requirement for future
-      output, not current behavior).
-- **Planned review output (Stage 4b and the command, not implemented
-  yet):**
-  - A `finalize` command
-    (`python -m inbox_helper finalize INPUT --review REVIEW_CSV --out DIR [--overwrite]`)
-    will use `validate_review` and write `approved_unsent.csv` and
-    `approved_unsent.md`, clearly marked **not sent**, containing only
-    approved and edited messages, with counts for all decisions. CSV
-    columns: `id, sender, subject, body, primary_intent, warnings,
-    decision, ai_draft, edited_draft, final_reply, reply_warnings,
-    reviewer_note, status` (status `approved_unsent`); `warnings` uses
-    the combined warnings shown in `review.md`.
-  - `reply_warnings` will flag unresolved placeholders and non-blocking
-    draft-check warnings from `drafter.check_draft` for edited replies
-    (commitment wording, currency, numbers or dates not in the message,
-    more than 100 words), never refusing a reply. A placeholder is any
-    placeholder used in the drafter's templates, or square brackets
-    holding an upper-case word of three or more letters, optionally
-    with more upper-case words and a description after a comma or colon
-    (`[DATE]`, `[DETAILS NEEDED]`); `[OK]`, `[sic]`, `[1]`, `[e.g.]` are
-    not placeholders.
-  - Binding the review file to its input (SHA-256) is to be decided in
-    Stage 4b.
+      `=HYPERLINK(...)`). Stage 4a writes nothing; since Stage 4b-1
+      every cell of `approved_unsent.csv` goes through `protect_cell`,
+      and `approved_unsent.md` shows such text only inside code blocks.
+- **Finalized output (implemented in Stage 4b, 2026-10-25;
+  `final_output.py`, `manifest.py`, `finalize_files.py`, `__main__.py`):**
+  - Command:
+    `python -m inbox_helper finalize INPUT --review REVIEW_CSV --out DIR [--overwrite] [--allow-unbound]`.
+    It never sends anything.
+  - **Input binding (Stage 4b-2):** `finalize` (through
+    `finalize.validate_bound_review`) reads `review.manifest.json` next
+    to the review file (after resolving links) with a strict reader:
+    regular file only, at most 64 KiB, UTF-8 JSON with exactly the
+    expected keys and types, no duplicate keys, no NaN or Infinity.
+    The manifest's SHA-256 must equal the input file's; then
+    `validate_review` runs unchanged, and both files are hashed again
+    at the end. A malformed manifest or a different fingerprint is
+    always refused. The order is: the input, review and manifest must
+    be different files; the input and review files are read and hashed;
+    the manifest is read (a malformed one is refused); a missing
+    manifest is refused unless `--allow-unbound` is given; a different
+    fingerprint is refused; only then do the Stage 4a row checks run.
+    With `--allow-unbound` and no manifest, the review is only
+    checked against the input's messages, and the command output and
+    `approved_unsent.md` say that the input binding was not checked.
+    The recorded file name is informational, so a renamed input is
+    accepted. Error messages never repeat manifest values except a
+    checked fingerprint.
+  - **Output files (rendering in Stage 4b-1, writing in Stage 4b-3):**
+    - `approved_unsent.csv`: columns `id, sender, subject, body,
+      primary_intent, warnings, decision, ai_draft, edited_draft,
+      final_reply, reply_warnings, reviewer_note, status` (status
+      `approved_unsent`); one row per approved or edited message in
+      input order; message fields come from the input, never from the
+      review file; every cell goes through `protect_cell`; UTF-8 with a
+      byte-order mark. `warnings` uses the combined warnings shown in
+      `review.md`.
+    - `approved_unsent.md`: **NOT SENT** header; the input and review
+      file names as they are now; the review file's SHA-256 and the
+      input's SHA-256 (for an unbound review, a note that the input
+      binding was not checked instead of the input's SHA-256);
+      counts for every decision; the ids of pending and rejected
+      messages; and for each reply its decision, sender, intent,
+      warnings, reply warnings, reviewer note, the final reply and, for
+      edits, the AI draft. Untrusted text is shown only in code blocks
+      or inline code; subjects and bodies are left out.
+    - The same inputs give byte-identical files. Both files are created
+      readable only by their owner (`0600`).
+  - **`reply_warnings`** (never block a reply): unresolved placeholders
+    in every final reply; for edited replies, the `drafter.check_draft`
+    warnings (commitment wording, currency, numbers or dates not in the
+    message, more than 100 words), with placeholder descriptions checked
+    too; and a note when the CSV cell got a protective `'`. A
+    placeholder is a template placeholder, or square brackets holding a
+    name of upper-case words (digits, `_`, `-` and `/` allowed, with at
+    least three upper-case letters in a row), optionally followed by
+    `,` or `:` and a description: `[DATE]`, `[FOLLOW-UP]`,
+    `[DATE/TIME]`, `[NOTE: call back]`. `[OK]`, `[sic]`, `[1]` and
+    `[Date]` are not placeholders.
+  - **Writing (Stage 4b-3):** an output that is the input, the review
+    file or the manifest (also via links, `..` or hard links) is
+    refused, even with `--overwrite`; an existing output that is not a
+    regular file or a link is refused; existing outputs are replaced
+    only with `--overwrite`. Everything is built before anything is
+    written. With `--overwrite` the old CSV and then the old Markdown
+    are removed first, then the new Markdown and then the new CSV are
+    moved into place, so old and new files never sit side by side. If
+    writing fails part-way, the error reports each file's state as
+    checked on disk (new version written, removed from a previous run,
+    still from a previous run, not written, or state could not be
+    confirmed) and any temporary files that could not be removed.
+  - **Command output (Stage 4b-4):** counts, the binding result and the
+    two paths; never message, reply or note text. Errors exit with
+    code 2. File errors that the library does not wrap are attributed
+    by the file they name (input, manifest or an output), and notes
+    attached to an error (temporary files that could not be removed)
+    are printed as `Note:` lines.
+  - **Known limitations (Stage 4b):**
+    - the manifest is not signed: it protects against mix-ups and stale
+      files, not deliberate tampering;
+    - a file changed and changed back between two reads (A→B→A) is not
+      detected;
+    - without `--overwrite`, a file another program creates at an output
+      path between the last check and the final move can still be
+      replaced; two runs writing into the same folder at the same time
+      are not prevented (no lock);
+    - files are not flushed to disk (no fsync), so after a power loss a
+      just-written file can be empty or missing; check the files and run
+      again;
+    - an interrupt (Ctrl-C) while writing gives no summary of which
+      outputs were changed; Python's error output lists temporary files
+      that could not be removed, but in a very small window right after
+      a temporary file is created one can be left unreported;
+    - a temporary file that could not be removed
+      (`.approved_unsent.*.tmp`, owner-only) may contain reply text and
+      should be deleted by hand;
+    - `reply_warnings` does not warn about invisible or bidirectional
+      characters in a reply, or about an unclosed `[` (Stage 4b-1);
+    - Python 3.11 or newer is required (error notes), as stated in the
+      README; this is not enforced by packaging metadata;
+    - whether a spreadsheet program keeps the protective `'` has not
+      been checked in a real spreadsheet program.
   - Generated files go to `output/` (ignored by Git); curated
-    demonstration files go to `examples/`.
+    demonstration files go to `examples/` (Stage 5).
 
 ## Data and provenance
 - Only synthetic (made-up) messages are used. No real people or real
@@ -762,7 +854,8 @@ Additional criteria:
   used by drafting (Stage 2: flagged messages get the safe fallback);
   shown in the review files (Stage 3); a reviewer note is required to
   approve or edit a flagged message when a review file is validated
-  (Stage 4a; writing approved replies is planned for Stage 4b). It
+  (Stage 4a; since Stage 4b the `finalize` command writes approved
+  replies, marked not sent). It
   can miss attacks and flag harmless text (see *Untrusted message
   content*). Neither the detector nor C1–C5 prevents prompt injection
   or guarantees safety; mandatory human review and the absence of any
@@ -953,5 +1046,22 @@ on.
   gate: none found a Critical or High issue; the one Medium finding
   (header errors could show message text) was fixed; the remaining Low
   findings are documented as known limitations.
+
+- **2026-10-25 — Stage 4a wording cleanup and Stage 4b implemented**
+  (commits `816724e`, `95d3fac`, `052d0f2`, `4f68042`, `f1b176e`):
+  safe rendering of the finalized output (4b-1), the review manifest
+  and input binding (4b-2), writing the finalized files (4b-3) and the
+  `finalize` command with `--allow-unbound` (4b-4); see *Finalized
+  output*. Author decisions: a manifest written by `draft` (not a CSV
+  column); reviews without a manifest refused unless `--allow-unbound`,
+  which never overrides a malformed manifest or a fingerprint mismatch;
+  rejected and pending messages appear only as counts and ids;
+  finalizing with pending messages is allowed; `protect_cell` on every
+  CSV cell; the AI draft shown for edits, subjects and bodies left out
+  of the Markdown; the Markdown shows the current file names; old
+  outputs removed CSV first, new ones placed Markdown first. Each step
+  was committed through the review gate (security and code-quality
+  reviews with no Critical, High or Medium finding left). Remaining Low
+  findings are listed as known limitations.
 
 Update this document as experiments and evidence change the design.

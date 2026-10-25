@@ -7,8 +7,13 @@ See `docs/intent.md` for the full design.
 ## Current status
 
 Implemented so far:
-- the `draft` command, which writes `review.md` (to read) and
-  `review.csv` (for decisions) — see *Drafting replies for review*;
+- the `draft` command, which writes `review.md` (to read),
+  `review.csv` (for decisions) and `review.manifest.json` (the input's
+  fingerprint) — see *Drafting replies for review*;
+- the `finalize` command, which checks a completed `review.csv`
+  against the original input and writes the approved replies to
+  `approved_unsent.md` and `approved_unsent.csv`, marked **not sent** —
+  see *Finalizing reviewed replies*;
 - loading and validating a CSV file of messages (`loader.py`);
 - rule-based intent classification (`classifier.py`) and an evaluation
   script (`evaluate.py`);
@@ -19,8 +24,7 @@ Implemented so far:
   messages with the override warning, and no draft for empty messages.
   Every draft is `pending_review`; nothing is ever sent.
 
-**Not implemented yet:** recording review decisions and the `finalize`
-step (Stage 4), and sample data with worked examples (Stage 5).
+**Not implemented yet:** sample data with worked examples (Stage 5).
 
 The override detector is simple pattern matching: it can miss attacks
 and can flag harmless text, so a warning only means "review carefully".
@@ -29,7 +33,7 @@ since been tuned using the development set only; see below.
 
 ## Setup
 
-Requires Python 3 and pytest. This project uses a local virtual
+Requires Python 3.11 or newer and pytest. This project uses a local virtual
 environment in `.venv` (Python 3.14.7 and pytest 9.1.1 at the time of
 writing). There are no other dependencies.
 
@@ -60,20 +64,25 @@ From the project folder:
 PYTHONPATH=src .venv/bin/python -m inbox_helper draft path/to/messages.csv --out output/
 ```
 
-This writes two files and **sends nothing**:
+This writes three files and **sends nothing**:
 
 - `output/review.md` — for reading. Messages grouped by intent, each
   with its warnings, the original text (shown as plain text), the
   keywords that matched, and the suggested draft or why there is none.
 - `output/review.csv` — for decisions. One row per message with blank
-  `decision`, `edited_draft` and `reviewer_note` columns. (Recording
-  decisions and the `finalize` step are not implemented yet.)
+  `decision`, `edited_draft` and `reviewer_note` columns; fill them in
+  and then run `finalize` (see below).
+- `output/review.manifest.json` — the input file's name and SHA-256
+  fingerprint, so `finalize` can check that a review is used with the
+  exact input it was made from. Keep it next to `review.csv`.
 
-Every draft has status `pending_review`. If `review.md` or `review.csv`
-already exists in the output folder, the command stops without changing
-them, because they may contain your review work; add `--overwrite` only
-if you want to replace them. Invalid input stops with an error and
-writes nothing. The `output/` folder is ignored by Git.
+Every draft has status `pending_review`. If any of the three files
+already exists in the output folder (a broken symbolic link counts too),
+the command stops without changing them, because they may contain your
+review work; add `--overwrite` only if you want to replace them. Invalid
+input stops with an error and writes nothing, and so does an input file
+that changes while it is being read, or whose name contains control or
+invisible characters. The `output/` folder is ignored by Git.
 
 Message text is untrusted: in `review.md` it is always shown inside
 code blocks (ids and senders as inline code), and in `review.csv`
@@ -91,13 +100,78 @@ change ids such as `001` or `1E3` when opening `review.csv`, so check
 ids carefully. See *Known limitations* under *Mandatory human review*
 in `docs/intent.md`.
 
+## Finalizing reviewed replies
+
+After filling in `decision` (`approve`, `edit` or `reject`; blank means
+still pending), `edited_draft` and `reviewer_note` in `review.csv`:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m inbox_helper finalize path/to/messages.csv --review output/review.csv --out output/final/
+```
+
+This **sends nothing**. It checks the review and writes two files:
+
+- `approved_unsent.md` — a report headed **NOT SENT**, with the review
+  file's fingerprint and the input's fingerprint (or, for a review
+  accepted with `--allow-unbound`, a note that the input binding was not
+  checked), the counts for every decision, the ids of
+  rejected and pending messages, and each approved or edited reply with
+  its warnings.
+- `approved_unsent.csv` — one row per approved or edited reply, with
+  status `approved_unsent`. Copy replies from here into your own email
+  tool and send them yourself. A `'` at the start of a cell was added
+  so that a spreadsheet does not run it as a formula; it is not part of
+  the reply.
+
+Rejected and pending messages are never written as rows. Both files
+are readable only by you (file mode `0600`).
+
+**Checks before anything is written.** The review must be the review of
+this exact input: `finalize` compares the input's SHA-256 with
+`review.manifest.json` next to the review file, then checks every row of
+`review.csv` against messages rebuilt from the input (see
+`docs/intent.md`). A missing manifest (for example, a review folder made
+before the manifest existed) is refused unless you add `--allow-unbound`;
+the review is then only checked against the input's messages, and both
+the command and `approved_unsent.md` say that the input binding was not
+checked. `--allow-unbound` never accepts a damaged manifest or a
+fingerprint that does not match. The manifest protects against mix-ups,
+not deliberate tampering: it is not signed.
+
+Existing `approved_unsent.*` files are only replaced with `--overwrite`.
+The output files are never the input, the review file or the manifest,
+even with `--overwrite`. Errors exit with code 2. They name files,
+rows and reasons and are designed not to show message or reply text
+(a short value pasted into an id or decision cell can still appear; see
+*Known limitations* in `docs/intent.md`).
+
+**If writing fails part-way.** The two files are written one after the
+other, so an error can leave them incomplete. The error then starts
+"The finalized files in … were left incomplete" and lists what is on
+disk (new version written, removed, still from a previous run, not
+written, or state could not be confirmed). Do not use those files; run
+the command again with `--overwrite`. Temporary files are normally
+removed; if one could not be removed, its path is printed (as part of
+the error or as a `Note:` line). Such files are named
+`.approved_unsent.*.tmp`, may contain reply text, and should be deleted.
+If you interrupt the command (Ctrl-C) while it writes, Python's error
+output lists the temporary files it could not remove, but there is no
+summary of which output files were changed. In rare cases a temporary
+file can also be left without being reported, so check the folder for
+`.approved_unsent.*.tmp` files, delete any you find, and run again with
+`--overwrite`.
+
 ## Running the tests
 
 From the project folder:
 
 ```bash
-.venv/bin/python -m pytest -v
+.venv/bin/python -m pytest -q --ignore=tests/test_eval_dataset.py --ignore=tests/test_evaluate.py
 ```
+
+The two excluded files check the frozen evaluation data and the
+evaluation script; they are run only as part of an evaluation, not as
+routine tests.
 
 ## Running the classification evaluation
 

@@ -1092,3 +1092,212 @@ Report: `docs/eval_dev_c1-c5_2026-10-23.md`.
 - No command and no output files yet (Stage 4b and the command).
 - At the time this entry was written, the changes were staged but not
   committed; the commit status is recorded in Git history.
+
+### Historical entries for the 2026-10-25 commits (written during Stage 4b-4)
+
+These four entries were written afterwards, on 2026-10-25, during
+Stage 4b-4. The facts come from the Git history (commit hashes, files,
+line counts) and from the review and test reports recorded during each
+stage. Test counts marked **re-run** were produced during Stage 4b-4 by
+running the permitted suite
+(`--ignore=tests/test_eval_dataset.py --ignore=tests/test_evaluate.py`)
+on an exported copy of that commit; they are new checks, not the
+original runs. Where the original count was not recorded here, only the
+re-run is given. Every commit went through the pre-commit review gate:
+both reviewers (security and code quality) reviewed the exact staged
+snapshot, no Critical, High or Medium finding was left, and the author
+approved the staged-diff hash and the commit message before the commit.
+
+### Stage 4a wording cleanup — 2026-10-25 (commit `816724e`)
+
+#### Changed
+- `finalize.py`: one error hint now says "Use edit to record an edited
+  reply" instead of "to send" (the tool never sends).
+- `docs/intent.md`: edited replies are kept as written "apart from CRLF
+  → LF line endings"; the acceptance criteria no longer claim that none
+  is implemented (criteria marked **Covered**/**Implemented** name their
+  tests); the test set size is 24, not "about 15".
+
+#### Checks
+- Re-run: permitted suite on `816724e` → 444 passed.
+
+### Stage 4b-1 (safe rendering of the finalized output) — 2026-10-25 (commit `95d3fac`)
+
+#### My decisions
+- Binding by a manifest file written by `draft` (option A), and
+  reviews without a manifest refused by default, with a possible
+  `--allow-unbound` that only works after the normal checks and says
+  that binding was not checked (decided for Stage 4b-2).
+- Rejected and pending messages only as counts and ids in the
+  Markdown; finalizing with pending messages allowed; `protect_cell` on
+  every CSV cell, ids included; the AI draft shown for edits, subjects
+  and bodies left out of the Markdown; `reply_warnings` included.
+- Placeholders: recognise names with `-`, `/`, `_`, digits, accented
+  upper-case letters and trailing spaces (`[FOLLOW-UP]`, `[DATE/TIME]`);
+  check a placeholder's description with `check_draft`
+  (`[NOTE: we will refund $500 today]` is flagged).
+
+#### Implemented (AI-generated, reviewed before commit)
+- `src/inbox_helper/final_output.py` (new, 287 lines): pure functions
+  with no file access — `render_final_csv`, `render_final_markdown`,
+  `reply_warnings`, the placeholder rule, `Provenance`, and
+  `finalized()`, which refuses entries that `validate_review` would not
+  produce.
+- `tests/test_final_output.py` (new, 575 lines), synthetic data only.
+
+#### Problems found and fixed during the stage
+- My file tools again wrote invisible characters literally into the
+  test file; it was converted to plain ASCII with `\u` escapes.
+- One test expectation left out the classifier's `unclear` flag; it now
+  uses the combined warnings.
+- First review round, three Medium findings, all fixed: text in
+  brackets that was not a placeholder was hidden from `check_draft`; the
+  report did not explain the protective `'`; no test showed that
+  subjects and bodies are left out of the Markdown.
+
+#### Limitations (Low/Info findings, documented, not fixed)
+- No warning for invisible or bidirectional characters in replies;
+  the error for an unchecked entry shows the raw id; `finalized()` does
+  not re-check the reviewer-note rule; duplicate `check_draft`
+  warnings; the `"; "` join in `reply_warnings` is ambiguous; invisible
+  spaces inside a placeholder stop it being recognised; an unclosed `[`
+  gets no warning.
+
+#### Checks
+- Re-run: permitted suite on `95d3fac` → 552 passed.
+
+### Stage 4b-2 (review manifest and input binding) — 2026-10-25 (commit `052d0f2`)
+
+#### My decisions
+- A missing manifest is refused before the Stage 4a checks unless
+  unbound reviews are allowed; the recorded input name is informational
+  (the fingerprint decides); the manifest sits beside the resolved
+  review file; `lexists` for `draft`'s existing-file check (broken
+  links count); the input hashed before and after loading; docs and the
+  CLI flag deferred to Stage 4b-4.
+- After the reviews: the partial-write message says "Not written", and
+  the old manifest is removed only with `--overwrite`.
+
+#### Implemented (AI-generated, reviewed before commit)
+- `src/inbox_helper/manifest.py` (new): the manifest format, a writer
+  that always gives the same bytes, and a strict reader (regular file,
+  no links, at most 64 KiB, exact keys and types, no duplicate keys, no
+  NaN; error messages never repeat manifest values).
+- `review.py`: `draft` writes `review.manifest.json` last, removes the
+  old one first with `--overwrite`, refuses input names it cannot
+  record, and refuses an input that changes while it is read.
+- `finalize.py`: `validate_bound_review` and `InputBindingError`
+  (missing, malformed, mismatch, changed, conflict).
+- `__main__.py`: prints the manifest path. Tests: `test_manifest.py`,
+  `test_binding.py` (new), `test_cli.py` updated.
+
+#### Reviews
+- No review round found a Critical, High or Medium issue. Two Low
+  findings were fixed as approved (the contradictory partial-write
+  wording; removing the old manifest without `--overwrite`); the rest
+  are documented.
+
+#### Checks
+- At the commit gate: permitted suite on the staged snapshot → 668
+  passed. Re-run: permitted suite on `052d0f2` → 668 passed.
+
+### Stage 4b-3 (writing the finalized files) — 2026-10-25 (commit `4f68042`)
+
+#### My decisions
+- A new module `finalize_files.py` with its own writer (the `draft`
+  writer is not reused); new error types; outputs may be written into
+  the review folder; the Markdown shows the current file names; `--out`
+  is required.
+- Write order: with `--overwrite`, remove the old CSV, then the old
+  Markdown; then move the new Markdown and then the new CSV into place.
+  A partial-write error must describe the files on disk truthfully and
+  say when a state could not be confirmed.
+
+#### Implemented (AI-generated, reviewed before commit)
+- `src/inbox_helper/finalize_files.py` (new, 292 lines):
+  `finalize_review`, `FinalOutputExistsError`,
+  `FinalOutputConflictError`, `FinalPartialOutputError`, and a writer
+  that checks every output on disk after a failure, cleans up
+  temporary files without hiding the original error, and refuses on its
+  own to replace files without `--overwrite`.
+- `tests/test_finalize_files.py` (new, 1151 lines).
+
+#### Reviews
+- The plan was reviewed three times before coding. Two plan versions
+  had Medium findings (an unspecified removal order, unnamed error
+  types, an unclear cleanup guard, missing tests; then a state check
+  that could not detect errors), and both were fixed in the plan.
+- Implementation reviews: one Medium (the "current file names" rule
+  was not tested), fixed with a test. Several rounds of Low findings
+  were fixed as approved (cleanup notes on interrupts, the overwrite
+  guard inside the writer, exact error wording for files whose state is
+  unknown, missing tests); the rest are documented.
+- One instruction asked me to test the opposite of an approved decision
+  (showing the manifest's file name instead of the current one); I asked
+  first, and the approved decision was kept.
+
+#### Checks
+- At the commit gate: focused tests → 251 passed; permitted suite on
+  the staged snapshot → 743 passed. Re-run: permitted suite on
+  `4f68042` → 743 passed.
+
+### Stage 4b-4 (`finalize` command and documentation) — 2026-10-25
+
+#### My decisions
+- Two commits, each through its own review gate: (A) the CLI command
+  and its tests, (B) documentation and this log.
+- `draft`'s misreporting of output-side errors stays unchanged and is
+  tracked separately; Python 3.11+ is stated in the README and
+  `docs/intent.md` only (no packaging change); the missing-manifest
+  message names
+  `--allow-unbound`; the README's test command excludes the two
+  evaluation test files; every handled error exits with code 2; the four
+  historical log entries above are added.
+- I kept the approved decision that the Markdown shows the current file
+  names when one instruction asked for a test of the opposite.
+
+#### Commit A — `f1b176e` (AI-generated, reviewed before commit)
+- `__main__.py`: `finalize INPUT --review REVIEW_CSV --out DIR
+  [--overwrite] [--allow-unbound]`, delegating to `finalize_review`.
+  It prints counts, the binding result (the input's SHA-256, or a
+  warning that binding was not checked) and the two paths. File errors
+  that the library does not wrap are attributed by the file they name
+  (input, manifest or output), so an output-side "not found" or "is a
+  folder" is never reported as an input problem; error notes are
+  printed as `Note:` lines. `draft` is unchanged.
+- `finalize.py`: the missing-manifest message names `--allow-unbound`.
+- `tests/test_cli_finalize.py` (new, 26 tests): success, `python -m`,
+  binding and `--allow-unbound` (which never overrides a malformed
+  manifest, a fingerprint mismatch or the review checks), refusals,
+  input errors, error attribution, notes, partial output, and that no
+  message, reply or note text is ever printed.
+- Reviews: no Critical, High or Medium finding. Three test gaps found
+  by the code-quality review (two input errors and relative paths) were
+  closed before the commit.
+- At the commit gate: focused tests → 169 passed; permitted suite on
+  the staged snapshot → 769 passed.
+
+#### Commit B — documentation (AI-generated)
+- `README.md`: status, Python 3.11+, the three `draft` files including
+  the manifest, a new *Finalizing reviewed replies* section (outputs
+  marked not sent, input binding and `--allow-unbound`, `0600` files,
+  partial-write errors, leftover temporary files, interrupts), and the
+  permitted test command.
+- `docs/intent.md`: status block, the Stage 3 and 4a limitations that
+  Stage 4b resolved, a new *Finalized output* section with the Stage 4b
+  known limitations, and a log entry.
+- `finalize.py`: the stale "Planned for Stage 4b" docstring paragraph
+  replaced (docstring only).
+- Checks before the review gate: permitted suite → 769 passed; frozen
+  CSV fingerprints `a19d0d36…` and `b74fe9fb…` unchanged (hash only);
+  the changed documents searched for "planned", "not implemented" and
+  "deferred" (the remaining hits are correct); the documented commands
+  run end to end on synthetic messages in a temporary folder.
+- The review-gate result and the commit are recorded in Git history.
+
+#### Limitations and open follow-ups
+- See *Known limitations (Stage 4b)* in `docs/intent.md`.
+- Tracked separately, not fixed: `draft` can report an output-side error
+  as an input problem; `review._write_files` can let a temporary-file
+  cleanup error replace the original error; the rule for finding the
+  manifest is written in three places and could share one helper.
