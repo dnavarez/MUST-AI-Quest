@@ -9,9 +9,14 @@
 > the approved replies to `approved_unsent.md` and `approved_unsent.csv`,
 > marked not sent (Stages 4b-1, 4b-3 and 4b-4), and 12 synthetic demo
 > messages with a worked example and named acceptance tests (Stage 5).
-> **Still open:** the human code and dependency review (see
-> *Acceptance criteria (v1)*), which only the author can do. The tool
-> never sends messages and has no sending capability. Sections below
+> **Human code and dependency review:** done by the author on
+> 2026-10-25 and accepted for the current challenge prototype, with
+> known limitations (see *Acceptance criteria (v1)* and the D7 entry in
+> `docs/daily_log.md`); this is not a complete security audit, a
+> production security certification or a claim of production
+> readiness. **Still open:** four Stage 4b follow-ups, tracked
+> separately and not fixed. The tool never sends messages and has no
+> sending capability. Sections below
 > say which parts are implemented and what is still open.
 
 ## Problem
@@ -702,8 +707,11 @@ The measurable checks below make the success criteria concrete.
 v1 is complete when all of the following pass as automated tests
 (pytest) and the human code and dependency review below is recorded.
 Criteria 1–5 and the tripwire test are covered by the named tests
-(since Stage 5, 2026-10-25). **v1 is not complete yet:** the human
-review is still pending.
+(since Stage 5, 2026-10-25), and the human review was recorded on
+2026-10-25. **v1 is complete for the current challenge prototype** by
+this definition. That does not make it production-ready: the review
+accepted known limitations, and four Stage 4b follow-ups are still
+open.
 
 1. **Empty message:** subject and body both `""`, and both `"   "` →
    no crash; `other_or_unclear`; flag `empty`; **no draft**; the report
@@ -788,8 +796,12 @@ Additional criteria:
     through a third-party library, an indirect or dynamic import, or
     code the search does not recognise. Passing this test does not, on
     its own, show that v1 cannot send messages.
-  - **Human code and dependency review — status: PENDING** (not yet
-    done by the author; nobody else may mark it done). Checklist:
+  - **Human code and dependency review — status: DONE, accepted for the
+    current challenge prototype** (by the author, 2026-10-25; the
+    evidence, the accepted limitations and the decision are in the D7
+    entry of `docs/daily_log.md`). It is not a complete security audit
+    or a production security certification. The checklist that was
+    followed:
     1. *Dependencies:* `pyproject.toml` declares no packages (it only
        configures pytest). Run `.venv/bin/python -m pip list` and
        confirm it shows only `pip`, `pytest` and pytest's own helper
@@ -1176,5 +1188,14 @@ on.
   files. Author decisions: include one genuine classifier mistake and
   label it; no tuning; the human code and dependency review stays
   pending until the author does it.
+
+- **2026-10-25 — Human code and dependency review (D7) done:** the
+  author followed the checklist under *Acceptance criteria (v1)* and
+  accepted the result for the current challenge prototype, with known
+  limitations (unsigned manifest, the `draft` output race, cleanup
+  errors that can hide the original error, misleading error messages,
+  the input re-read edge case, untested Windows behaviour). Not a
+  production security certification. The four Stage 4b follow-ups stay
+  open. Details in `docs/daily_log.md`.
 
 Update this document as experiments and evidence change the design.

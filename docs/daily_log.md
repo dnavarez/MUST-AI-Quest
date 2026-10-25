@@ -1391,3 +1391,86 @@ approved the staged-diff hash and the commit message before the commit.
   Commit B reviews); `draft` reporting an
   output-side error as an input problem; the cleanup-masking issue in
   `review._write_files`; the manifest-path rule written in three places.
+
+### D7 — Human code and dependency review — 2026-10-25
+
+This is my own review decision, made after going through the checklist
+in `docs/intent.md` (*Acceptance criteria (v1)*) step by step with AI
+assistance. The AI ran the commands and reported the evidence; the
+decision below is mine. It is a human review decision for the current
+challenge prototype only. It is **not** a complete security audit, a
+production security certification, or a claim of production readiness.
+
+#### Evidence reviewed
+- **Step 1, dependencies:** `pyproject.toml` declares no packages; it
+  only configures pytest. `.venv/bin/python -m pip list` showed only
+  `pip`, `pytest` and pytest's own helpers (`iniconfig`, `packaging`,
+  `pluggy`, `Pygments`); `pip show` confirmed the helpers are required
+  only by pytest. No runtime dependencies and nothing unexpected.
+- **Step 2, imports:** a line-start search of the 13 source files
+  (each named explicitly) found only standard-library modules
+  (`argparse`, `collections`, `csv`, `dataclasses`, `hashlib`, `io`,
+  `json`, `os`, `pathlib`, `re`, `stat`, `sys`, `tempfile`,
+  `unicodedata`) and `inbox_helper`'s own modules; no email, network,
+  `subprocess`, `webbrowser` or `importlib` module. Limits acknowledged:
+  the search finds only imports at the start of a line, not indented,
+  dynamic or indirect ones, so it was not treated as proof on its own.
+- **Step 3, source reading:** all 13 files in `src/inbox_helper/`
+  (the inventory matched exactly) were read in full. No sending,
+  uploading, networking, subprocess, `os.system`/`os.popen`, `exec`,
+  `eval` or dynamic-import capability was identified; `os` is used only
+  for file operations. Output qualifications: `draft` and `finalize`
+  write only fixed file names inside the `--out` folder (plus
+  short-lived temporary files there); `--out` and missing parent folders
+  are created if needed; if `--out` is or passes through a symbolic
+  link, files go where it points; a symbolic link at an output name is
+  replaced or removed itself, never the file it points to;
+  `evaluate.py` writes nothing and prints a report that includes
+  shortened message text.
+- **Step 4, behaviour checks** (run on `data/messages.csv`, output only
+  under the disposable, Git-ignored `output/` folder), all five matched
+  the documented expectations:
+  1. `draft` wrote the three review files and printed "Nothing was
+     sent. Every draft is pending_review." (exit 0);
+  2. all 12 rows of `output/demo/review.csv` have status
+     `pending_review`;
+  3. `finalize` wrote `approved_unsent.md` (with the **NOT SENT.**
+     notice) and `approved_unsent.csv` (5 rows, all `approved_unsent`),
+     byte-identical to `examples/3_final/` (exit 0);
+  4. `demo-09` has the `possible_instruction_override` warning and the
+     neutral fallback draft, with no refund, approval or amount;
+  5. without a manifest, `finalize` refused with "The review file cannot
+     be used. Nothing was changed." and the `--allow-unbound` hint, exit
+     code 2 and no output folder; with `--allow-unbound` it succeeded
+     and printed "Warning: input binding was NOT checked".
+  The files in `examples/` and `data/messages.csv` were fingerprinted
+  before and after and did not change; the protected evaluation files
+  were not opened and stayed unchanged.
+
+#### Limitations I accept for this prototype
+- The manifest is not signed: it protects against mix-ups, not
+  deliberate tampering.
+- `draft` without `--overwrite` can still replace a file that another
+  program creates between its existence check and the write (race).
+- `draft`'s writer can let a temporary-file cleanup error replace the
+  original error (`review._write_files`).
+- Some error messages are misleading: `draft` can report an output-side
+  problem as an input problem, or an unreadable input as a write error;
+  a rare partial-write message can wrongly say there is no manifest.
+- The input file is read more than once; a file changed and changed
+  back between reads (A→B→A) is not detected.
+- Windows-specific behaviour (for example the missing `O_NOFOLLOW`
+  protection) has not been tested.
+- The other limitations listed in `docs/intent.md`.
+- Outside the source review (noted in Step 3): the virtual
+  environment's startup files (`.pth`), the cached bytecode in
+  `__pycache__` and Python itself were trusted, not reviewed.
+
+#### Decision
+- **Accepted** for the current challenge demo scope, with the
+  limitations above.
+- The Stage 4b follow-ups stay tracked separately for future work: the
+  stale "before any other check" wording in the `validate_bound_review`
+  docstring; `draft` reporting an output-side error as an input
+  problem; the cleanup-masking issue in `review._write_files`; and the
+  manifest-path rule written in three places.

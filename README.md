@@ -30,9 +30,13 @@ Implemented so far:
   (`tests/test_acceptance.py`); criterion 4 is covered in
   `tests/test_cli.py`.
 
-**Still open:** the human code and dependency review, which the author
-does by hand (see *Acceptance criteria (v1)* in `docs/intent.md`). It is
-not done yet.
+**Human code and dependency review:** done by the author on
+2026-10-25 and accepted for the current challenge prototype, with known
+limitations (see the D7 entry in `docs/daily_log.md` and *Acceptance
+criteria (v1)* in `docs/intent.md`). This is not a complete security
+audit, a production security certification or a claim of production
+readiness. Four follow-ups from Stage 4b are still open and tracked
+separately; they have not been fixed.
 
 The override detector is simple pattern matching: it can miss attacks
 and can flag harmless text, so a warning only means "review carefully".
