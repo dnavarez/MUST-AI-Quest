@@ -1301,3 +1301,93 @@ approved the staged-diff hash and the commit message before the commit.
   as an input problem; `review._write_files` can let a temporary-file
   cleanup error replace the original error; the rule for finding the
   manifest is written in three places and could share one helper.
+
+### Stage 5 (sample data, worked example and acceptance tests) — 2026-10-25
+
+#### My decisions
+- Two commits, each through its own review gate: (5a) sample data,
+  worked example and tests; (5b) documentation and this log.
+- About 12 newly written synthetic messages covering every intent and
+  the edge cases; include at least one genuine classifier mistake,
+  labelled honestly; no tuning of the classifier or the drafter.
+- Worked example decisions: approve 3, edit 2 (one fills a
+  placeholder), reject 2, leave the rest pending. In the example, both
+  edited replies (`demo-02` and `demo-08`) fill in the name and the
+  answer; both keep `[YOUR NAME]` for the sender to sign.
+- Named acceptance tests for v1 criteria 1, 2, 3 and 5; if one failed,
+  stop and report instead of changing the application.
+- `.gitattributes` so Git keeps the exact bytes of the new files.
+- The human code and dependency review stays pending until I do it
+  myself.
+
+#### Commit 5a — `82d7693` (AI-generated, reviewed before commit)
+- `data/messages.csv`: 12 messages (`demo-01` to `demo-12`, all
+  `@example.com`). `demo-12` is a complaint without complaint keywords;
+  the classifier labels it `other_or_unclear`, and this is left as a
+  visible mistake.
+- `examples/`: the `draft` output, the same review with decisions filled
+  in (approve `demo-01`, `demo-03`, `demo-06`; edit `demo-02`, `demo-08`;
+  reject `demo-09` (the rule-override attempt) and `demo-11`; the rest
+  pending), the `finalize` output, and `examples/README.md`.
+- `tests/test_examples.py`: the example files must be byte-for-byte what
+  the current code produces; `demo-12` must stay the documented mistake.
+- `tests/test_acceptance.py`: criteria 1, 2, 3 and 5. All passed on the
+  existing code; nothing in the application was changed.
+- `.gitattributes`: `examples/** -text` and `data/messages.csv -text`.
+
+#### Reviews of Commit 5a (three rounds)
+- No round found a Critical, High or Medium issue.
+- Round 1: Low findings (a macOS `.DS_Store` file would break the tests,
+  the regeneration steps were in the wrong order, nothing pinned
+  `demo-12` as a mistake, a missing caveat about placeholders, and
+  several weak test checks). Fixed as approved.
+- Round 2: Low findings (skipping every hidden file was too broad; the
+  "No draft" check could not fail; a wrong reason in a test comment;
+  two README wording points). Fixed as approved.
+- **Protected-file incident in round 2.** For a line-length check, the
+  code-quality reviewer ran `awk 'length>99' tests/test_*.py | wc -l`.
+  The wildcard unintentionally matched the protected
+  `tests/test_eval_dataset.py` and `tests/test_evaluate.py`, so `awk`
+  read them. The command returned only one combined count of long
+  lines, and that count included lines from the two protected files;
+  no contents of those files were shown or used. This still
+  broke the project's rule that those files are never read. The
+  protected files were then confirmed unchanged (`git diff --quiet
+  HEAD` on the four protected paths, and the frozen CSV fingerprints).
+  The incident did not change any file and did not affect any
+  evaluation result. From round 3 on, every reviewer prompt listed the
+  allowed files explicitly and banned wildcards, and both reviewers
+  confirmed they followed that rule.
+- Round 3: no new findings that needed fixing; both reviewers said the
+  snapshot was acceptable to commit.
+
+#### Checks at the Commit 5a gate
+- Focused tests (`test_examples`, `test_acceptance`, `test_cli`,
+  `test_cli_finalize`) → 78 passed; permitted suite (15 named test
+  files) → 785 passed.
+- A fresh copy of the staged snapshot, exported by explicit file names
+  (without the protected files), → 187 passed for the example,
+  acceptance, command-line, writer, binding and no-network tests.
+- CRLF line endings and byte-order marks kept; `.gitattributes` applies
+  only to the new files; frozen CSV fingerprints `a19d0d36…` and
+  `b74fe9fb…` unchanged (hash only).
+
+#### Commit 5b — documentation (AI-generated)
+- `README.md`: status (Stage 5 done; the human review still open) and a
+  new *Trying it with the sample data* section.
+- `docs/intent.md`: status block, the *v1 scope* run instructions, the
+  data and example files, criteria 1, 2, 3 and 5 marked covered (with
+  the interpretations used), the human code and dependency review
+  checklist (status: pending), the `demo-12` limitation, and a log
+  entry.
+- The review-gate result and the commit are recorded in Git history.
+
+#### Open
+- **Human code and dependency review: pending.** The checklist is in
+  `docs/intent.md` (*Acceptance criteria (v1)*). v1 is not complete
+  until I have done it and recorded the result here.
+- Still tracked separately: the stale "before any other check" wording
+  in the `validate_bound_review` docstring (found in the Stage 4b-4
+  Commit B reviews); `draft` reporting an
+  output-side error as an input problem; the cleanup-masking issue in
+  `review._write_files`; the manifest-path rule written in three places.

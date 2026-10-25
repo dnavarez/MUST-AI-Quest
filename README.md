@@ -22,9 +22,17 @@ Implemented so far:
 - reply drafting (`drafter.py`): fixed templates with `[PLACEHOLDERS]`,
   no text copied from the message, guard checks, a neutral fallback for
   messages with the override warning, and no draft for empty messages.
-  Every draft is `pending_review`; nothing is ever sent.
+  Every draft is `pending_review`; nothing is ever sent;
+- 12 synthetic demo messages (`data/messages.csv`) and a worked example
+  of the whole process (`examples/`) — see *Trying it with the sample
+  data*;
+- named acceptance tests for v1 criteria 1, 2, 3 and 5
+  (`tests/test_acceptance.py`); criterion 4 is covered in
+  `tests/test_cli.py`.
 
-**Not implemented yet:** sample data with worked examples (Stage 5).
+**Still open:** the human code and dependency review, which the author
+does by hand (see *Acceptance criteria (v1)* in `docs/intent.md`). It is
+not done yet.
 
 The override detector is simple pattern matching: it can miss attacks
 and can flag harmless text, so a warning only means "review carefully".
@@ -160,6 +168,33 @@ summary of which output files were changed. In rare cases a temporary
 file can also be left without being reported, so check the folder for
 `.approved_unsent.*.tmp` files, delete any you find, and run again with
 `--overwrite`.
+
+## Trying it with the sample data
+
+`data/messages.csv` holds 12 made-up messages (all addresses are
+`@example.com`): one for each of the six main intents, an empty message
+(which, like unclear messages, is `other_or_unclear`), a message with
+two requests, an attempt to give the tool instructions, a late order, a
+sender and subject that look like spreadsheet formulas, and one message
+the classifier gets wrong. `examples/` shows the whole process for these
+messages — the review files, the same review with decisions filled in,
+and the finalized replies — and `examples/README.md` explains each file.
+
+To run it yourself:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m inbox_helper draft data/messages.csv --out output/demo/
+```
+
+Fill in some decisions in `output/demo/review.csv` (or copy
+`examples/2_reviewed/review.csv` over it), then:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m inbox_helper finalize data/messages.csv --review output/demo/review.csv --out output/demo/final/
+```
+
+Nothing is sent. `tests/test_examples.py` checks that the files in
+`examples/` are exactly what the current code produces.
 
 ## Running the tests
 

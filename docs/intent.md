@@ -7,10 +7,12 @@
 > a completed `review.csv` against the input (Stage 4a) and against the
 > input's fingerprint (Stage 4b-2), and the `finalize` command writing
 > the approved replies to `approved_unsent.md` and `approved_unsent.csv`,
-> marked not sent (Stages 4b-1, 4b-3 and 4b-4). **Planned, not
-> implemented yet:** sample data with worked examples (Stage 5). The
-> tool never sends messages and has no sending capability. Sections
-> below say which parts are implemented and which are planned.
+> marked not sent (Stages 4b-1, 4b-3 and 4b-4), and 12 synthetic demo
+> messages with a worked example and named acceptance tests (Stage 5).
+> **Still open:** the human code and dependency review (see
+> *Acceptance criteria (v1)*), which only the author can do. The tool
+> never sends messages and has no sending capability. Sections below
+> say which parts are implemented and what is still open.
 
 ## Problem
 When someone has a pile of incoming messages, it takes time to
@@ -39,10 +41,14 @@ v1 is a **local, deterministic, rule-based Python command-line program**.
 - **Output:** one Markdown review report (for example
   `output/review.md`), grouped by primary intent, showing each original
   message next to its draft, flags, and the keywords that matched.
-- **Run (implemented in Stage 3):**
+- **Run:**
   `PYTHONPATH=src .venv/bin/python -m inbox_helper draft INPUT.csv --out output/`
-  writes `output/review.md` and `output/review.csv` (see *Mandatory
-  human review*).
+  writes `output/review.md`, `output/review.csv` and
+  `output/review.manifest.json` (Stages 3 and 4b-2); after the human has
+  filled in the decisions,
+  `PYTHONPATH=src .venv/bin/python -m inbox_helper finalize INPUT.csv --review output/review.csv --out output/final/`
+  writes the approved replies, marked not sent (Stage 4b). See
+  *Mandatory human review*.
 
 What v1 deliberately does **not** do:
 - It has **no email-sending capability**. There is no send function,
@@ -646,15 +652,17 @@ the sender's name or subject".)
       README; this is not enforced by packaging metadata;
     - whether a spreadsheet program keeps the protective `'` has not
       been checked in a real spreadsheet program.
-  - Generated files go to `output/` (ignored by Git); curated
-    demonstration files go to `examples/` (Stage 5).
+  - Generated files go to `output/` (ignored by Git); the curated
+    worked example is in `examples/` (Stage 5; see
+    `examples/README.md`).
 
 ## Data and provenance
 - Only synthetic (made-up) messages are used. No real people or real
   inbox data.
 - Files:
-  - `data/messages.csv` — demo messages for running the program
-    (planned, not created yet).
+  - `data/messages.csv` — 12 synthetic demo messages for running the
+    program and for the worked example in `examples/` (Stage 5). They
+    are not labelled and not used for evaluation or tuning.
   - `data/eval_dev.csv` — 26 labelled messages; may be inspected while
     tuning the keyword rules.
   - `data/eval_test.csv` — 24 labelled messages, held out; used only to
@@ -692,9 +700,10 @@ the sender's name or subject".)
 
 The measurable checks below make the success criteria concrete.
 v1 is complete when all of the following pass as automated tests
-(pytest). v1 is not complete yet. Criteria marked **Covered** or
-**Implemented** below are checked by the named tests; the others are
-not yet confirmed by a named acceptance test.
+(pytest) and the human code and dependency review below is recorded.
+Criteria 1–5 and the tripwire test are covered by the named tests
+(since Stage 5, 2026-10-25). **v1 is not complete yet:** the human
+review is still pending.
 
 1. **Empty message:** subject and body both `""`, and both `"   "` →
    no crash; `other_or_unclear`; flag `empty`; **no draft**; the report
@@ -733,6 +742,35 @@ not yet confirmed by a named acceptance test.
    numbers, or delivery promises; every number in the draft appears in
    the source.
 
+**Covered since Stage 5** by `tests/test_acceptance.py`, which runs the
+real `draft` command on the messages above:
+`test_criterion_1_empty_message` (both `""` and `"   "`);
+`test_criterion_2_two_requests`,
+`test_criterion_2_ambiguous_first_sentence_is_unclear` and
+`test_criterion_2_clear_request_then_ambiguous_sentence`;
+`test_criterion_3_rule_override_attempt`; and
+`test_criterion_5_no_invented_facts`. How these tests read the
+criteria:
+- Criterion 3: the override "flag" is the
+  `possible_instruction_override` entry in the `warnings` column (where
+  the code records it). "No refund confirmation, no $500, no approved"
+  is checked strictly: the draft must not be empty and must not contain
+  "refund", "confirm", "approved" or "500" (the check ignores case).
+- Criterion 2: "the draft addresses both parts" is checked as the draft
+  containing both template placeholders, one for each request:
+  `[CONFIRM AVAILABILITY OR PROPOSE A TIME]` and
+  `Regarding your question: [ANSWER OR NEXT STEP]`.
+- Criterion 5: "asks for the order number" is checked as the draft
+  containing "could you share" and "order reference"; in the current
+  draft both come from the template sentence with the reviewer
+  placeholder `[DETAILS NEEDED, e.g. order reference]`. "No dates,
+  amounts, tracking numbers or delivery promises" is checked as no
+  digit, no `$`, and none of a fixed list of words ("tracking",
+  "deliver", "arrive", "tomorrow", "today", "tonight", "week", the
+  weekdays, and the month names except "May", which is also a common
+  word). Because this message contains no numbers, "every number in the
+  draft appears in the source" means the draft has no digit at all.
+
 Additional criteria:
 - **No sending or network capability**, checked in two ways:
   - *Code and dependency review (primary check):* a human reads the
@@ -750,6 +788,66 @@ Additional criteria:
     through a third-party library, an indirect or dynamic import, or
     code the search does not recognise. Passing this test does not, on
     its own, show that v1 cannot send messages.
+  - **Human code and dependency review — status: PENDING** (not yet
+    done by the author; nobody else may mark it done). Checklist:
+    1. *Dependencies:* `pyproject.toml` declares no packages (it only
+       configures pytest). Run `.venv/bin/python -m pip list` and
+       confirm it shows only `pip`, `pytest` and pytest's own helper
+       packages (on 2026-10-25: `iniconfig`, `packaging`, `pluggy`,
+       `Pygments`).
+    2. *Imports:* run
+       `grep -n -E "^(import|from) " src/inbox_helper/*.py` (this pattern
+       only covers the source folder) and confirm every import is either
+       the Python standard library or `inbox_helper` itself, with no
+       email, network, `subprocess`, `webbrowser` or `importlib` module.
+       This finds only imports at the start of a line; look for any
+       others while reading the code (step 3).
+    3. *Reading the code:* first run `ls src/inbox_helper/` and check
+       that it lists exactly these 13 source files (plus a
+       `__pycache__` folder): `__init__.py`, `__main__.py`,
+       `classifier.py`, `drafter.py`, `evaluate.py`, `final_output.py`,
+       `finalize.py`, `finalize_files.py`, `loader.py`, `manifest.py`,
+       `models.py`, `review.py`, `safety.py`. Any other file must be
+       read too. Then read each file. Confirm that nothing sends,
+       uploads or connects anywhere, and that files are written only to
+       the `--out` folder (`draft`: three review files; `finalize`: two
+       `approved_unsent` files; both commands also create short-lived
+       temporary files there while writing).
+    4. *Safety behaviour, checked by running:* run `draft` and
+       `finalize` on `data/messages.csv` as in the README (output in
+       `output/demo/`). Confirm that:
+       - `draft` prints "Nothing was sent. Every draft is
+         pending_review." and every row of `output/demo/review.csv` has
+         status `pending_review`;
+       - `approved_unsent.md` is headed **NOT SENT** (as in
+         `examples/3_final/approved_unsent.md`) and every row of
+         `approved_unsent.csv` has status `approved_unsent`;
+       - the override message (`demo-09`) has the
+         `possible_instruction_override` warning and a neutral draft;
+       - `finalize` refuses a review without a manifest unless
+         `--allow-unbound` is given. Test this only with files under
+         `output/`: first copy `examples/2_reviewed/review.csv` over
+         `output/demo/review.csv`, so the test uses real reviewed
+         decisions and cannot pass with an empty review; then create a
+         new, empty folder `output/unbound/` (delete any earlier
+         `output/unbound/` first: a manifest left there by an earlier
+         run would change the result), copy only
+         `output/demo/review.csv` into it (not the manifest), and run
+         `PYTHONPATH=src .venv/bin/python -m inbox_helper finalize data/messages.csv --review output/unbound/review.csv --out output/unbound/final/`.
+         Expect `Error: The review file cannot be used. Nothing was
+         changed.` with a hint about `--allow-unbound`, exit code 2, and
+         no `output/unbound/final/` folder. Running the same command
+         with `--allow-unbound` added should succeed and print
+         `Warning: input binding was NOT checked`. **Never delete,
+         rename or edit a manifest under `examples/`**: those files are
+         the committed worked example, and `tests/test_examples.py`
+         checks them.
+    5. *Known limits to accept or reject:* the manifest is not signed;
+       formula protection depends on the spreadsheet; the remaining
+       limitations listed in this document.
+    6. *Record the result* in `docs/daily_log.md`: the date, what was
+       checked, anything found, and the decision (accepted, or what must
+       change).
 - A README explains setup and how to run the program and tests.
 
 ## Evaluation plan
@@ -865,7 +963,10 @@ Additional criteria:
   document requests with no keyword (dev-14); past mentions of a
   meeting (dev-18); complaints with no keyword (dev-19); help request
   and frustration in one sentence (dev-22); "this morning's update"
-  read as status (dev-11, secondary only).
+  read as status (dev-11, secondary only). The worked example shows
+  one such miss in the demo data: `demo-12`, a complaint without
+  complaint keywords, is classified `other_or_unclear` (see
+  `examples/README.md`); the rules were not changed for it.
 - English only.
 - The exact challenge instructions still need to be confirmed and may
   change the scope.
@@ -1063,5 +1164,17 @@ on.
   was committed through the review gate (security and code-quality
   reviews with no Critical, High or Medium finding left). Remaining Low
   findings are listed as known limitations.
+
+- **2026-10-25 — Stage 5 (sample data, worked example, acceptance
+  tests)** (commit `82d7693`, documentation in a separate commit):
+  `data/messages.csv` (12 synthetic messages), the worked example in
+  `examples/` (draft → reviewed with 3 approved, 2 edited, 2 rejected
+  and 5 pending → finalized; the override message is rejected), named
+  acceptance tests for criteria 1, 2, 3 and 5 (all passed on the
+  existing code; nothing was changed to make them pass), and
+  `.gitattributes` so Git never changes the line endings of these
+  files. Author decisions: include one genuine classifier mistake and
+  label it; no tuning; the human code and dependency review stays
+  pending until the author does it.
 
 Update this document as experiments and evidence change the design.
