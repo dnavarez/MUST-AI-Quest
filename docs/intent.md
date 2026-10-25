@@ -525,7 +525,8 @@ the sender's name or subject".)
     - a reviewer note made only of punctuation (for example `.`)
       counts as meaningful, so it satisfies the note requirement for
       an override-flagged message;
-    - edited replies and notes are kept as written, including
+    - edited replies and notes are kept as written (apart from CRLF →
+      LF line endings), including
       text that starts like a spreadsheet formula (for example
       `=HYPERLINK(...)`). Nothing is written in Stage 4a; Stage 4b must
       apply `protect_cell` to every cell of the output CSV and show
@@ -599,7 +600,9 @@ the sender's name or subject".)
 
 The measurable checks below make the success criteria concrete.
 v1 is complete when all of the following pass as automated tests
-(pytest). None of them pass yet; none are implemented.
+(pytest). v1 is not complete yet. Criteria marked **Covered** or
+**Implemented** below are checked by the named tests; the others are
+not yet confirmed by a named acceptance test.
 
 1. **Empty message:** subject and body both `""`, and both `"   "` →
    no crash; `other_or_unclear`; flag `empty`; **no draft**; the report
@@ -743,8 +746,8 @@ Additional criteria:
 ### Reporting
 - Results from each scored version are recorded in
   `docs/daily_log.md` with the date and version.
-- With about 15 test messages the results are indicative only, and will
-  be reported that way.
+- With 24 test messages the results are indicative only, and will be
+  reported that way.
 
 ## Known limitations and risks
 - The same person writes the test data and the rules, which can inflate

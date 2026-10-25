@@ -526,7 +526,7 @@ def check_decision(entry, row):
         name = decision or "blank (pending)"
         problems.append(
             f"{where}: the decision is {name}, but edited_draft is filled in. "
-            "Use edit to send an edited reply, or clear edited_draft."
+            "Use edit to record an edited reply, or clear edited_draft."
         )
 
     if decision in ("approve", "edit"):
