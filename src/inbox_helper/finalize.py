@@ -719,7 +719,8 @@ def validate_bound_review(input_path, review_path, allow_unbound=False):
             f"there is no review manifest ({MANIFEST_NAME}) next to the review "
             f"file {review_path}, so the review cannot be linked to its input "
             "file. Use a review folder written by the current draft command, or "
-            "explicitly allow an unbound review."
+            "add --allow-unbound to accept an unbound review (it is then only "
+            "checked against the input's messages)."
         ))
     if manifest is not None and manifest.input_sha256 != input_sha256:
         raise InputBindingError("mismatch", (
