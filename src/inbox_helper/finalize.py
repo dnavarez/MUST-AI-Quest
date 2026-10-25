@@ -10,6 +10,10 @@ every review row must match that rebuilt entry before its decision is used:
 - ids are never repaired. An unknown id is only compared with the unmatched
   messages to explain what probably happened, and the run is refused.
 
+validate_bound_review (Stage 4b-2) also checks the review manifest that
+links the review folder to the input file's SHA-256, and then runs the same
+checks.
+
 Nothing is written and nothing is sent here. Problems with the review file
 (or with how it relates to the input) raise ReviewFileError listing the
 problems found (up to MAX_ERRORS shown), so a person can fix most of them at
@@ -29,6 +33,7 @@ placeholders.
 """
 
 import csv
+import hashlib
 import io
 import re
 import unicodedata
@@ -38,6 +43,7 @@ from pathlib import Path
 
 from inbox_helper.drafter import PENDING_REVIEW
 from inbox_helper.loader import load_messages
+from inbox_helper.manifest import MANIFEST_NAME, ManifestError, read_manifest
 from inbox_helper.review import (
     CSV_COLUMNS,
     ReviewEntry,
@@ -229,6 +235,17 @@ def expected_raw(entry):
 # --- Reading the review file -------------------------------------------------
 
 
+def _read_review_bytes(path):
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        raise ReviewFileError([f"review file not found: {path}"]) from None
+    except IsADirectoryError:
+        raise ReviewFileError([f"the review file is a folder: {path}"]) from None
+    except OSError as exc:
+        raise ReviewFileError([f"could not read the review file {path}: {exc}"]) from None
+
+
 def read_review_rows(path):
     """Return the rows of the review file at `path`, in file order.
 
@@ -239,19 +256,14 @@ def read_review_rows(path):
     rows at the end are ignored; a blank row between rows is an error.
     """
     path = Path(path)
+    data = _read_review_bytes(path)
     try:
-        text = path.read_bytes().decode("utf-8-sig")
-    except FileNotFoundError:
-        raise ReviewFileError([f"review file not found: {path}"]) from None
-    except IsADirectoryError:
-        raise ReviewFileError([f"the review file is a folder: {path}"]) from None
+        text = data.decode("utf-8-sig")
     except UnicodeDecodeError:
         raise ReviewFileError([
             f"the review file is not UTF-8 text: {path}. In a spreadsheet "
             "program, save it as 'CSV UTF-8'."
         ]) from None
-    except OSError as exc:
-        raise ReviewFileError([f"could not read the review file {path}: {exc}"]) from None
 
     reader = csv.reader(io.StringIO(text, newline=""), strict=True)
     try:
@@ -609,6 +621,14 @@ def _refuse_review_as_input(input_path):
         ])
 
 
+def _refuse_same_input_and_review(input_path, review_path):
+    if _same_file(input_path, review_path):
+        raise ReviewFileError([
+            f"the input file {input_path} and the review file {review_path} are "
+            "the same file. Give the original message CSV as input."
+        ])
+
+
 def validate_review(input_path, review_path):
     """Check the review file against the original input file.
 
@@ -619,14 +639,110 @@ def validate_review(input_path, review_path):
     Nothing is written.
     """
     input_path, review_path = Path(input_path), Path(review_path)
-    if _same_file(input_path, review_path):
-        raise ReviewFileError([
-            f"the input file {input_path} and the review file {review_path} are "
-            "the same file. Give the original message CSV as input."
-        ])
+    _refuse_same_input_and_review(input_path, review_path)
     messages = load_messages(input_path)
     _refuse_review_as_input(input_path)
     check_ids(messages, input_path)
     entries = build_entries(messages)
     rows = read_review_rows(review_path)
     return validate_rows(entries, rows)
+
+
+# --- Binding the review to its input (Stage 4b-2) ----------------------------
+
+
+class InputBindingError(ReviewFileError):
+    """Raised when the review cannot be linked to its input file.
+
+    `reason` is "missing" (no manifest), "malformed" (a manifest that cannot
+    be used), "mismatch" (the input is not the file the review was made
+    from), "changed" (a file changed while being checked) or "conflict"
+    (the manifest is the input or the review file).
+    """
+
+    def __init__(self, reason, problem):
+        self.reason = reason
+        super().__init__([problem])
+
+
+@dataclass(frozen=True)
+class BoundReview:
+    """A checked review and the fingerprints it was checked with."""
+
+    reviewed: list  # ReviewedEntry for every message, as validate_review returns
+    input_sha256: str | None  # None: no manifest, so the input was not bound
+    review_sha256: str
+    manifest_input_name: str | None  # the name the manifest records; informational
+
+
+def _sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def validate_bound_review(input_path, review_path, allow_unbound=False):
+    """Check the review manifest, then the review file with validate_review.
+
+    The manifest is review.manifest.json in the folder of the review file,
+    after symbolic links are resolved. Its input_sha256 must equal the input
+    file's SHA-256; its input_name is not compared, so a renamed input is
+    still accepted. A malformed manifest or a different fingerprint is always
+    refused. A missing manifest is refused before any other check unless
+    `allow_unbound` is True; the review is then checked as usual and
+    returned with input_sha256 None. The input and review files are hashed
+    again at the end, and a change during the check is refused.
+
+    Raises InputBindingError for manifest problems, and whatever
+    validate_review raises. Nothing is written.
+    """
+    input_path, review_path = Path(input_path), Path(review_path)
+    manifest_path = review_path.resolve().parent / MANIFEST_NAME
+    _refuse_same_input_and_review(input_path, review_path)
+    for other, label in ((input_path, "input"), (review_path, "review")):
+        if _same_file(manifest_path, other):
+            raise InputBindingError("conflict", (
+                f"the {label} file {other} is the review manifest {manifest_path}. "
+                "Give the original message CSV as input and review.csv as the "
+                "review file."
+            ))
+
+    input_sha256 = _sha256(input_path.read_bytes())
+    review_sha256 = _sha256(_read_review_bytes(review_path))
+    try:
+        manifest = read_manifest(manifest_path)
+    except ManifestError as exc:
+        raise InputBindingError("malformed", (
+            f"{exc}. The review cannot be linked to its input file. Run the "
+            "draft command again into a new folder."
+        )) from None
+    if manifest is None and not allow_unbound:
+        raise InputBindingError("missing", (
+            f"there is no review manifest ({MANIFEST_NAME}) next to the review "
+            f"file {review_path}, so the review cannot be linked to its input "
+            "file. Use a review folder written by the current draft command, or "
+            "explicitly allow an unbound review."
+        ))
+    if manifest is not None and manifest.input_sha256 != input_sha256:
+        raise InputBindingError("mismatch", (
+            f"the input file {input_path} is not the file this review was made "
+            f"from: its SHA-256 is {input_sha256}, but the review manifest "
+            f"{manifest_path} records {manifest.input_sha256}. Give the original "
+            "input file, or run the draft command again for this input."
+        ))
+
+    reviewed = validate_review(input_path, review_path)
+
+    for path, label, expected, read in (
+        (input_path, "input", input_sha256, Path.read_bytes),
+        (review_path, "review", review_sha256, _read_review_bytes),
+    ):
+        if _sha256(read(path)) != expected:
+            raise InputBindingError("changed", (
+                f"the {label} file {path} changed while it was being checked. "
+                "Run the command again."
+            ))
+    return BoundReview(
+        reviewed=reviewed,
+        input_sha256=input_sha256 if manifest is not None else None,
+        review_sha256=review_sha256,
+        manifest_input_name=manifest.input_name if manifest is not None else None,
+    )

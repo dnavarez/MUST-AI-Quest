@@ -1,6 +1,8 @@
 """End-to-end tests for: python -m inbox_helper draft INPUT --out DIR"""
 
 import csv
+import hashlib
+import json
 import os
 import re
 import subprocess
@@ -11,6 +13,8 @@ import pytest
 
 from inbox_helper.__main__ import main
 from inbox_helper.drafter import FALLBACK_BODY, _assemble
+from inbox_helper import review
+from inbox_helper.manifest import MANIFEST_NAME, read_manifest
 from inbox_helper.review import REVIEW_CSV, REVIEW_MD, WARNING_TEXT
 from inbox_helper.safety import OVERRIDE_WARNING
 
@@ -47,6 +51,10 @@ def write_input(path, rows, header=("id", "sender", "subject", "body")):
 def read_csv(path):
     with open(path, encoding="utf-8-sig", newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+def sha256_of(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def run(args, capsys):
@@ -128,7 +136,7 @@ def test_output_is_byte_identical_across_runs(tmp_path, capsys):
     run(["draft", str(source), "--out", str(tmp_path / "a")], capsys)
     run(["draft", str(source), "--out", str(tmp_path / "b")], capsys)
 
-    for name in (REVIEW_MD, REVIEW_CSV):
+    for name in (REVIEW_MD, REVIEW_CSV, MANIFEST_NAME):
         assert (tmp_path / "a" / name).read_bytes() == (tmp_path / "b" / name).read_bytes()
 
 
@@ -182,7 +190,10 @@ def test_non_utf8_input(tmp_path, capsys):
 # --- Existing output ---------------------------------------------------------
 
 
-@pytest.mark.parametrize("existing", [[REVIEW_MD], [REVIEW_CSV], [REVIEW_MD, REVIEW_CSV]])
+@pytest.mark.parametrize(
+    "existing",
+    [[REVIEW_MD], [REVIEW_CSV], [MANIFEST_NAME], [REVIEW_MD, REVIEW_CSV, MANIFEST_NAME]],
+)
 def test_existing_review_files_are_not_overwritten(tmp_path, capsys, existing):
     source = write_input(tmp_path / "messages.csv", TEN_MESSAGES[:2])
     out_dir = tmp_path / "output"
@@ -204,13 +215,15 @@ def test_overwrite_replaces_both_files_and_leaves_no_temp_files(tmp_path, capsys
     out_dir.mkdir()
     (out_dir / REVIEW_MD).write_text("old", encoding="utf-8")
     (out_dir / REVIEW_CSV).write_text("old", encoding="utf-8")
+    (out_dir / MANIFEST_NAME).write_text("old", encoding="utf-8")
 
     code, _, _ = run(["draft", str(source), "--out", str(out_dir), "--overwrite"], capsys)
 
     assert code == 0
     assert (out_dir / REVIEW_MD).read_text(encoding="utf-8").startswith("# Inbox Helper")
     assert read_csv(out_dir / REVIEW_CSV)[0]["id"] == "m01"
-    assert sorted(os.listdir(out_dir)) == [REVIEW_CSV, REVIEW_MD]
+    assert read_manifest(out_dir / MANIFEST_NAME).input_sha256 == sha256_of(source)
+    assert sorted(os.listdir(out_dir)) == [REVIEW_CSV, MANIFEST_NAME, REVIEW_MD]
 
 
 # --- Real command ------------------------------------------------------------
@@ -276,7 +289,8 @@ def _review_with_decision(tmp_path, capsys):
         ),
         encoding="utf-8-sig",
     )
-    before = {name: (out_dir / name).read_bytes() for name in (REVIEW_MD, REVIEW_CSV)}
+    names = (REVIEW_MD, REVIEW_CSV, MANIFEST_NAME)
+    before = {name: (out_dir / name).read_bytes() for name in names}
     return out_dir, before
 
 
@@ -323,3 +337,178 @@ def test_symlinked_input_to_the_output_is_refused(tmp_path, capsys):
 
     assert code == 2 and "is the output file" in err
     assert {n: (out_dir / n).read_bytes() for n in before} == before
+
+
+# --- Stage 4b-2: the review manifest -----------------------------------------
+
+
+def test_draft_writes_a_manifest_with_the_input_fingerprint(tmp_path, capsys):
+    source = write_input(tmp_path / "messages.csv", TEN_MESSAGES[:3])
+    out_dir = tmp_path / "output"
+
+    code, out, err = run(["draft", str(source), "--out", str(out_dir)], capsys)
+
+    assert code == 0, err
+    assert f"Wrote {out_dir / MANIFEST_NAME}" in out
+    data = json.loads((out_dir / MANIFEST_NAME).read_text(encoding="ascii"))
+    assert data == {
+        "format": "inbox_helper review manifest",
+        "version": 1,
+        "input_name": "messages.csv",
+        "input_sha256": sha256_of(source),
+    }
+    assert sha256_of(source) in (out_dir / REVIEW_MD).read_text(encoding="utf-8")
+
+
+def test_manifest_stores_only_the_input_file_name(tmp_path, capsys):
+    folder = tmp_path / "private" / "mailroom"
+    folder.mkdir(parents=True)
+    source = write_input(folder / "caf\u00e9.csv", TEN_MESSAGES[:1])
+
+    code, _, err = run(["draft", str(source), "--out", str(tmp_path / "o")], capsys)
+
+    assert code == 0, err
+    raw = (tmp_path / "o" / MANIFEST_NAME).read_bytes()
+    assert raw.isascii() and b"private" not in raw and b"mailroom" not in raw
+    assert read_manifest(tmp_path / "o" / MANIFEST_NAME).input_name == "caf\u00e9.csv"
+
+
+def test_broken_symbolic_link_counts_as_an_existing_output(tmp_path, capsys):
+    source = write_input(tmp_path / "messages.csv", TEN_MESSAGES[:1])
+    out_dir = tmp_path / "output"
+    out_dir.mkdir()
+    try:
+        os.symlink(tmp_path / "nowhere", out_dir / MANIFEST_NAME)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"this platform cannot create symbolic links here: {exc}")
+
+    code, _, err = run(["draft", str(source), "--out", str(out_dir)], capsys)
+
+    assert code == 2 and "--overwrite" in err
+    assert sorted(os.listdir(out_dir)) == [MANIFEST_NAME]
+    assert not (tmp_path / "nowhere").exists()
+
+
+def test_overwrite_replaces_a_symbolic_link_without_following_it(tmp_path, capsys):
+    source = write_input(tmp_path / "messages.csv", TEN_MESSAGES[:1])
+    out_dir = tmp_path / "output"
+    out_dir.mkdir()
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep me", encoding="utf-8")
+    try:
+        os.symlink(victim, out_dir / MANIFEST_NAME)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"this platform cannot create symbolic links here: {exc}")
+
+    code, _, err = run(["draft", str(source), "--out", str(out_dir), "--overwrite"], capsys)
+
+    assert code == 0, err
+    assert victim.read_text(encoding="utf-8") == "keep me"
+    assert not (out_dir / MANIFEST_NAME).is_symlink()
+    assert read_manifest(out_dir / MANIFEST_NAME).input_sha256 == sha256_of(source)
+
+
+def test_input_that_is_the_output_manifest_is_refused(tmp_path, capsys):
+    out_dir, before = _review_with_decision(tmp_path, capsys)
+    args = ["draft", str(out_dir / MANIFEST_NAME), "--out", str(out_dir), "--overwrite"]
+
+    code, _, err = run(args, capsys)
+
+    assert code == 2 and "is the output file" in err
+    assert {n: (out_dir / n).read_bytes() for n in before} == before
+
+
+@pytest.mark.parametrize("name", ["bad\u0007name.csv", "bad\u202ename.csv"])
+def test_input_name_that_cannot_be_recorded_is_refused(tmp_path, capsys, name):
+    try:
+        source = write_input(tmp_path / name, TEN_MESSAGES[:1])
+    except OSError as exc:
+        pytest.skip(f"this file system does not allow the name: {exc}")
+
+    code, _, err = run(["draft", str(source), "--out", str(tmp_path / "o")], capsys)
+
+    assert code == 2 and "Rename the input file" in err
+    assert not (tmp_path / "o").exists()
+
+
+def test_input_changed_while_being_read_is_refused(tmp_path, capsys, monkeypatch):
+    source = write_input(tmp_path / "messages.csv", TEN_MESSAGES[:2])
+    real_load = review.load_messages
+
+    def load_then_change(path):
+        messages = real_load(path)
+        with open(path, "a", encoding="utf-8", newline="") as handle:
+            handle.write("m99,zed@example.com,Hi,Hello\r\n")
+        return messages
+
+    monkeypatch.setattr(review, "load_messages", load_then_change)
+
+    code, _, err = run(["draft", str(source), "--out", str(tmp_path / "o")], capsys)
+
+    assert code == 2 and "changed while it was being read" in err
+    assert not (tmp_path / "o").exists()
+
+
+def test_failed_replace_reports_a_partial_folder_without_a_manifest(tmp_path, capsys, monkeypatch):
+    source = write_input(tmp_path / "messages.csv", TEN_MESSAGES[:2])
+    out_dir = tmp_path / "output"
+    run(["draft", str(source), "--out", str(out_dir)], capsys)
+    real_replace = os.replace
+
+    def fail_on_csv(src, dst):
+        if Path(dst).name == REVIEW_CSV:
+            raise OSError("disk full")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(review.os, "replace", fail_on_csv)
+
+    code, _, err = run(["draft", str(source), "--out", str(out_dir), "--overwrite"], capsys)
+
+    assert code == 2
+    assert "Only some review files" in err and "disk full" in err
+    assert f"Changed: {MANIFEST_NAME} (removed), {REVIEW_MD}" in err
+    assert f"Not written: {REVIEW_CSV}, {MANIFEST_NAME}" in err
+    assert "Not changed" not in err
+    # No manifest is left, so the mixed folder cannot pass as a bound review.
+    assert sorted(os.listdir(out_dir)) == [REVIEW_CSV, REVIEW_MD]
+
+
+def test_failure_before_any_change_leaves_the_old_files(tmp_path, capsys, monkeypatch):
+    source = write_input(tmp_path / "messages.csv", TEN_MESSAGES[:2])
+    out_dir, before = _review_with_decision(tmp_path, capsys)
+
+    def fail(path):
+        raise OSError("read-only folder")
+
+    monkeypatch.setattr(review.os, "remove", fail)
+
+    code, _, err = run(["draft", str(source), "--out", str(out_dir), "--overwrite"], capsys)
+
+    assert code == 2 and "could not write the review files" in err
+    assert {n: (out_dir / n).read_bytes() for n in before} == before
+
+
+def test_draft_without_overwrite_never_removes_a_manifest(tmp_path, capsys, monkeypatch):
+    # A manifest that appears after the existing-file check (for example from
+    # another run) must not be deleted when --overwrite was not given.
+    source = write_input(tmp_path / "messages.csv", TEN_MESSAGES[:2])
+    out_dir = tmp_path / "output"
+    out_dir.mkdir()
+    real_mkstemp = review.tempfile.mkstemp
+
+    def mkstemp_after_manifest_appears(*args, **kwargs):
+        if not (out_dir / MANIFEST_NAME).exists():
+            (out_dir / MANIFEST_NAME).write_text("other run", encoding="utf-8")
+        return real_mkstemp(*args, **kwargs)
+
+    def fail(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(review.tempfile, "mkstemp", mkstemp_after_manifest_appears)
+    monkeypatch.setattr(review.os, "replace", fail)
+
+    code, _, err = run(["draft", str(source), "--out", str(out_dir)], capsys)
+
+    assert code == 2 and "could not write the review files" in err
+    assert (out_dir / MANIFEST_NAME).read_text(encoding="utf-8") == "other run"
+    assert sorted(os.listdir(out_dir)) == [MANIFEST_NAME]

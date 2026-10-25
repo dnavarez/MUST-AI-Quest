@@ -1,5 +1,8 @@
 """Build the review files: review.md for reading, review.csv for decisions.
 
+review.manifest.json records the input file's name and SHA-256, so the
+review can later be checked against the exact input it was made from.
+
 For every message: classify, check for instruction-like text, then draft,
 passing the safety warnings to the drafter explicitly. Nothing is sent and
 nothing is approved here; every entry is "pending_review".
@@ -23,6 +26,7 @@ from pathlib import Path
 from inbox_helper.classifier import KEYWORDS, OTHER, classify
 from inbox_helper.drafter import PENDING_REVIEW, draft_reply
 from inbox_helper.loader import MessageFileError, load_messages
+from inbox_helper.manifest import MANIFEST_NAME, input_name_problem, render_manifest
 from inbox_helper.safety import find_override_signals, safety_warnings
 
 REVIEW_MD = "review.md"
@@ -57,6 +61,14 @@ class OutputExistsError(Exception):
 
 class InputOutputConflictError(Exception):
     """Raised when the input file is one of the review files to be written."""
+
+
+class InputNameError(Exception):
+    """Raised when the input file's name cannot be recorded in the manifest."""
+
+
+class InputChangedError(Exception):
+    """Raised when the input file changes while it is being read."""
 
 
 # Characters a spreadsheet may treat as the start of a formula.
@@ -305,20 +317,47 @@ def render_csv(entries):
 # --- Writing -----------------------------------------------------------------
 
 
-def _write_pair(out_dir, files):
-    """Write each file to a temporary file, then move them into place."""
+class PartialOutputError(OSError):
+    """Raised when only some review files were replaced before an error."""
+
+
+def _write_files(out_dir, files, remove_first=()):
+    """Write each file to a temporary file, then move them into place in order.
+
+    Files named in `remove_first` are deleted after every temporary file is
+    written and before anything is moved into place. If moving fails after a
+    change was made, PartialOutputError says which files were changed.
+    """
     temps = []
+    changed = []
     try:
         for name, data in files:
             fd, temp = tempfile.mkstemp(dir=out_dir, prefix=f".{name}.", suffix=".tmp")
-            temps.append((temp, out_dir / name))
+            temps.append((temp, name))
             with os.fdopen(fd, "wb") as handle:
                 handle.write(data)
-        for temp, target in temps:
-            os.replace(temp, target)
+        try:
+            for name in remove_first:
+                if os.path.lexists(out_dir / name):
+                    os.remove(out_dir / name)
+                    changed.append(f"{name} (removed)")
+            for temp, name in temps:
+                os.replace(temp, out_dir / name)
+                changed.append(name)
+        except OSError as exc:
+            if not changed:
+                raise
+            unwritten = [name for _, name in temps if name not in changed]
+            raise PartialOutputError(
+                f"Only some review files in {out_dir} were changed before an error "
+                f"({exc}). Changed: {', '.join(changed)}. Not written: "
+                f"{', '.join(unwritten) or 'none'}. The folder may now hold files from "
+                "different runs and no review manifest, so it will be refused for "
+                "review. Run the command again."
+            ) from exc
     finally:
         for temp, _ in temps:
-            if os.path.exists(temp):
+            if os.path.lexists(temp):
                 os.remove(temp)
 
 
@@ -332,15 +371,27 @@ def _same_file(a, b):
         return False
 
 
-def generate_review(input_path, out_dir, overwrite=False):
-    """Create review.md and review.csv for the messages in `input_path`.
+def _sha256(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
-    Both files are fully built before anything is written, so invalid input
-    leaves no output behind. Existing review files are never replaced unless
-    `overwrite` is True. Returns a small summary dictionary.
+
+def generate_review(input_path, out_dir, overwrite=False):
+    """Create review.md, review.csv and review.manifest.json for `input_path`.
+
+    All files are fully built before anything is written, so invalid input
+    leaves no output behind. Existing review files (even broken symbolic
+    links) are never replaced unless `overwrite` is True. The manifest
+    records the input's SHA-256; the input is hashed before and after it is
+    loaded, and a change in between is refused.
+
+    Writing three files is not atomic. With `overwrite`, the old manifest is
+    removed before any file is replaced, and the new manifest is moved into
+    place last, so a folder left half-written by a crash has no manifest and
+    is refused for review by default. Returns a small summary dictionary.
     """
     input_path, out_dir = Path(input_path), Path(out_dir)
-    targets = [out_dir / REVIEW_MD, out_dir / REVIEW_CSV]
+    names = (REVIEW_MD, REVIEW_CSV, MANIFEST_NAME)
+    targets = [out_dir / name for name in names]
     # Never read from a review file and then write over it, even with
     # --overwrite: that would destroy review decisions.
     for target in targets:
@@ -350,15 +401,27 @@ def generate_review(input_path, out_dir, overwrite=False):
                 "Nothing was changed. Use the original message CSV as input, "
                 "or choose another --out folder."
             )
+    name_problem = input_name_problem(input_path.name)
+    if name_problem:
+        raise InputNameError(
+            f"{name_problem}: {input_path}. Nothing was changed. Rename the "
+            "input file and run the command again."
+        )
 
+    sha256 = _sha256(input_path)
     messages = load_messages(input_path)
     check_ids(messages, input_path)
     entries = build_entries(messages)
-    sha256 = hashlib.sha256(input_path.read_bytes()).hexdigest()
+    if _sha256(input_path) != sha256:
+        raise InputChangedError(
+            f"The input file {input_path} changed while it was being read. "
+            "Nothing was changed. Run the command again."
+        )
     md = render_markdown(entries, input_path.name, sha256).encode("utf-8")
     csv_bytes = render_csv(entries).encode("utf-8-sig")
+    manifest = render_manifest(input_path.name, sha256)
 
-    existing = [str(t) for t in targets if t.exists()]
+    existing = [str(t) for t in targets if os.path.lexists(t)]
     if existing and not overwrite:
         raise OutputExistsError(
             f"Review file(s) already exist: {', '.join(existing)}. They may contain "
@@ -366,11 +429,17 @@ def generate_review(input_path, out_dir, overwrite=False):
             "replace them, or choose another --out folder."
         )
     out_dir.mkdir(parents=True, exist_ok=True)
-    _write_pair(out_dir, [(REVIEW_MD, md), (REVIEW_CSV, csv_bytes)])
+    _write_files(
+        out_dir,
+        [(REVIEW_MD, md), (REVIEW_CSV, csv_bytes), (MANIFEST_NAME, manifest)],
+        # Only an explicit --overwrite may delete an existing manifest.
+        remove_first=(MANIFEST_NAME,) if overwrite else (),
+    )
     return {
         "messages": len(entries),
         "drafts": sum(1 for e in entries if e.draft.text is not None),
         "with_warnings": sum(1 for e in entries if all_warnings(e)),
         "review_md": str(targets[0]),
         "review_csv": str(targets[1]),
+        "manifest": str(targets[2]),
     }

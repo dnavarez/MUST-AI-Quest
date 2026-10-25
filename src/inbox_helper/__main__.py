@@ -10,8 +10,11 @@ import sys
 
 from inbox_helper.loader import MessageFileError
 from inbox_helper.review import (
+    InputChangedError,
+    InputNameError,
     InputOutputConflictError,
     OutputExistsError,
+    PartialOutputError,
     generate_review,
 )
 
@@ -23,10 +26,11 @@ def main(argv=None):
     )
     commands = parser.add_subparsers(dest="command", required=True)
     draft = commands.add_parser(
-        "draft", help="classify messages and write review.md and review.csv"
+        "draft",
+        help="classify messages and write review.md, review.csv and review.manifest.json",
     )
     draft.add_argument("input", help="CSV file with columns id, sender, subject, body")
-    draft.add_argument("--out", required=True, help="folder for review.md and review.csv")
+    draft.add_argument("--out", required=True, help="folder for the review files")
     draft.add_argument(
         "--overwrite", action="store_true",
         help="replace existing review files (they may contain review decisions)",
@@ -43,7 +47,10 @@ def main(argv=None):
         return _error(f"input file is not valid UTF-8 text: {args.input}")
     except csv.Error as exc:
         return _error(f"input file is not a valid CSV file: {exc}")
-    except (MessageFileError, OutputExistsError, InputOutputConflictError) as exc:
+    except (
+        MessageFileError, OutputExistsError, InputOutputConflictError,
+        InputNameError, InputChangedError, PartialOutputError,
+    ) as exc:
         return _error(str(exc))
     except OSError as exc:
         return _error(f"could not write the review files: {exc}")
@@ -55,6 +62,7 @@ def main(argv=None):
     )
     print(f"Wrote {summary['review_md']}")
     print(f"Wrote {summary['review_csv']}")
+    print(f"Wrote {summary['manifest']}")
     print("Nothing was sent. Every draft is pending_review.")
     return 0
 
