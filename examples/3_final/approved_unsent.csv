@@ -1,0 +1,66 @@
+﻿id,sender,subject,body,primary_intent,warnings,decision,ai_draft,edited_draft,final_reply,reply_warnings,reviewer_note,status
+demo-01,Priya Shah <priya@example.com>,Budget review,Could we schedule a call on Thursday afternoon to go over the budget?,meeting_request,,approve,"Hello [NAME],
+
+Thank you for your message about arranging a time to talk. [CONFIRM AVAILABILITY OR PROPOSE A TIME]
+
+Best regards,
+[YOUR NAME]",,"Hello [NAME],
+
+Thank you for your message about arranging a time to talk. [CONFIRM AVAILABILITY OR PROPOSE A TIME]
+
+Best regards,
+[YOUR NAME]",unresolved placeholder: [NAME]; unresolved placeholder: [CONFIRM AVAILABILITY OR PROPOSE A TIME]; unresolved placeholder: [YOUR NAME],,approved_unsent
+demo-02,Tom Reyes <tom@example.com>,Changing my email,How do I change the email address on my account?,support_question,,edit,"Hello [NAME],
+
+Thank you for getting in touch. To help with your request, could you share [DETAILS NEEDED, e.g. account or order reference]? [ANSWER OR NEXT STEP]
+
+Best regards,
+[YOUR NAME]","Hello Tom,
+
+Thank you for getting in touch. You can change the email address on your account from your account settings page. If that does not work, just reply to this message.
+
+Best regards,
+[YOUR NAME]","Hello Tom,
+
+Thank you for getting in touch. You can change the email address on your account from your account settings page. If that does not work, just reply to this message.
+
+Best regards,
+[YOUR NAME]",unresolved placeholder: [YOUR NAME],Filled in the name and the answer; sign with my own name before sending.,approved_unsent
+demo-03,Lena Fischer <lena@example.com>,Junior designer,"Hello, I would like to apply for the junior designer position. My CV is attached.",job_application,,approve,"Hello [NAME],
+
+Thank you for your interest in a role with us. [RESPONSE ABOUT THE ROLE AND HIRING PROCESS]
+
+Best regards,
+[YOUR NAME]",,"Hello [NAME],
+
+Thank you for your interest in a role with us. [RESPONSE ABOUT THE ROLE AND HIRING PROCESS]
+
+Best regards,
+[YOUR NAME]",unresolved placeholder: [NAME]; unresolved placeholder: [RESPONSE ABOUT THE ROLE AND HIRING PROCESS]; unresolved placeholder: [YOUR NAME],,approved_unsent
+demo-06,Ben Okafor <ben@example.com>,Invoice,Thanks so much for sorting out my invoice so quickly.,thank_you,,approve,"Hello [NAME],
+
+Thank you for your kind message. [OPTIONAL PERSONAL NOTE]
+
+Best regards,
+[YOUR NAME]",,"Hello [NAME],
+
+Thank you for your kind message. [OPTIONAL PERSONAL NOTE]
+
+Best regards,
+[YOUR NAME]",unresolved placeholder: [NAME]; unresolved placeholder: [OPTIONAL PERSONAL NOTE]; unresolved placeholder: [YOUR NAME],,approved_unsent
+demo-08,Chen Wei <chen@example.com>,Two things,"Can we meet Tuesday at 3pm? Also, I still can't log into my account.",meeting_request,multiple_intents,edit,"Hello [NAME],
+
+Thank you for your message about arranging a time to talk. [CONFIRM AVAILABILITY OR PROPOSE A TIME] Regarding your question: [ANSWER OR NEXT STEP]
+
+Best regards,
+[YOUR NAME]","Hello Chen,
+
+Thank you for your message. Tuesday at 3pm works for me, and I will send a calendar invitation. Regarding the login problem: please try resetting your password from the sign-in page, and let me know if that does not help.
+
+Best regards,
+[YOUR NAME]","Hello Chen,
+
+Thank you for your message. Tuesday at 3pm works for me, and I will send a calendar invitation. Regarding the login problem: please try resetting your password from the sign-in page, and let me know if that does not help.
+
+Best regards,
+[YOUR NAME]",unresolved placeholder: [YOUR NAME]; contains commitment or approval wording: 'i will',Answered both parts of the message.,approved_unsent

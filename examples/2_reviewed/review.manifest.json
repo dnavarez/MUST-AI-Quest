@@ -1,0 +1,6 @@
+{
+  "format": "inbox_helper review manifest",
+  "version": 1,
+  "input_name": "messages.csv",
+  "input_sha256": "2575b60e9b5a358a88e7d240b7221300e89b53525c2aecc3a3d827a2bc5a38ae"
+}
