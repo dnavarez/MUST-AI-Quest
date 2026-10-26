@@ -980,8 +980,12 @@ Additional criteria:
   complaint keywords, is classified `other_or_unclear` (see
   `examples/README.md`); the rules were not changed for it.
 - English only.
-- The exact challenge instructions still need to be confirmed and may
-  change the scope.
+- The challenge instructions were transcribed from screenshots of the
+  quest page taken on 2026-10-25 (not yet checked word for word) into
+  `docs/quest_requirements.md`. This project is Format A (Inbox
+  helper), which matches the v1 scope, except that empty messages get
+  no draft (see *Success criteria*). The page does not say what
+  `Final directive.md` must contain or what the Loom video should show.
 
 ## Open questions
 - Will the keyword approach reach a useful accuracy, or will the
