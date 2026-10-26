@@ -985,7 +985,9 @@ Additional criteria:
   `docs/quest_requirements.md`. This project is Format A (Inbox
   helper), which matches the v1 scope, except that empty messages get
   no draft (see *Success criteria*). The page does not say what
-  `Final directive.md` must contain or what the Loom video should show.
+  `Final directive.md` must contain or what the Loom video should show;
+  `Final directive.md` at the repository root records the author's
+  interpretation (confirmed by the author).
 
 ## Open questions
 - Will the keyword approach reach a useful accuracy, or will the

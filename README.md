@@ -2,7 +2,14 @@
 
 Groups incoming messages by what each sender wants and drafts a short
 reply for each one, for a human to review. It never sends anything.
-See `docs/intent.md` for the full design.
+It is a command-line program with no graphical interface: you run it
+in Terminal and open the files it writes. See `docs/intent.md` for the
+full design.
+
+Other project documents: `Final directive.md` (my interpretation of
+the required final directive), `docs/quest_requirements.md` (the
+MUST AI Quest requirements), `docs/daily_log.md` (the work log) and
+`docs/unlearned.md` (what I unlearned).
 
 ## Current status
 
@@ -196,6 +203,13 @@ Fill in some decisions in `output/demo/review.csv` (or copy
 ```bash
 PYTHONPATH=src .venv/bin/python -m inbox_helper finalize data/messages.csv --review output/demo/review.csv --out output/demo/final/
 ```
+
+If you run these commands again, each one stops without changing
+anything when its own output files already exist (`draft` in
+`output/demo/`, `finalize` in `output/demo/final/`). Use new folders
+instead (for example `--out output/run2/` for `draft` and
+`--out output/run2/final/` for `finalize`), pass
+`--review output/run2/review.csv`, and fill in the decisions again.
 
 Nothing is sent. `tests/test_examples.py` checks that the files in
 `examples/` are exactly what the current code produces.

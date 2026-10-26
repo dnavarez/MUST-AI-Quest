@@ -1,5 +1,48 @@
 # Five-Day Work Log
 
+## Summary by day
+
+Days 1–5 are 2026-10-23 to 2026-10-27 (confirmed by me). The quest
+page countdown suggests a deadline of about 2026-10-28 11:31 (an
+estimate; see `docs/quest_requirements.md`). The detailed entries
+follow the summary.
+
+- **Day 1 — 2026-10-23.** Started the quest, chose the Inbox Helper
+  (later confirmed as Format A) and wrote `docs/intent.md`. With AI
+  doing the coding and me making the decisions (the code stayed
+  "pending my review" until D7 on Day 3), built CSV loading, the keyword
+  classifier and the evaluation script; reviewed
+  every evaluation label myself, with AI help; tuned the rules on the
+  development set only and scored the frozen test set once after tuning
+  (strict accuracy 14/24, against 13/24 before tuning; both with the
+  reviewed labels). Built the safety warnings (Stage 1), reply drafting
+  (Stage 2) and the `draft` command (Stage 3). First Git commits:
+  `b2211ad`, `66c72a6`, `d9b0bf2`. Lesson recorded: a report with
+  correct numbers can still mislead if its parts do not add up.
+- **Day 2 — 2026-10-24.** Stage 4a: checking a completed `review.csv`
+  against the input; five rounds of security and code-quality review
+  before commit `5a7da4a`. One reviewer ran the evaluation tests,
+  which probably read the frozen evaluation data (unchanged); the
+  suite has been run without them since (recorded below). No other
+  work is recorded for this day.
+- **Day 3 — 2026-10-25.** Stage 4b: the `finalize` command, the
+  review manifest and the safe final output; Stage 5: demo messages, a
+  worked example and acceptance tests; my human code and dependency
+  review (D7), which completed v1 for the challenge prototype. A review
+  agent's wildcard command read protected test files, breaking the rule
+  that they are never read; wildcards were banned afterwards (recorded
+  below). I took screenshots of the quest page and ran the whole flow
+  myself for the first time; I felt relieved when it worked. Commits
+  `816724e` to `36a387c`.
+- **Day 4 — 2026-10-26.** Recorded the quest requirements in
+  `docs/quest_requirements.md` after three review rounds (commit
+  `0ec39eb`). The AI drafted `Final directive.md`, the unlearning note
+  and this day structure; I then confirmed the directive and answered
+  the questions for the unlearning note, which was rewritten from my
+  answers (not yet committed). The videos have not been
+  recorded yet.
+- **Day 5 — 2026-10-27.** Not yet completed.
+
 ## Day 1 — 2026-10-23
 
 ### Goal
@@ -994,6 +1037,8 @@ Report: `docs/eval_dev_c1-c5_2026-10-23.md`.
   the symbolic-link and `..` tests failed.
 - Nothing committed.
 
+## Day 2 — 2026-10-24
+
 ### Stage 4a (review-file validation) — 2026-10-24
 
 #### My decisions
@@ -1092,6 +1137,8 @@ Report: `docs/eval_dev_c1-c5_2026-10-23.md`.
 - No command and no output files yet (Stage 4b and the command).
 - At the time this entry was written, the changes were staged but not
   committed; the commit status is recorded in Git history.
+
+## Day 3 — 2026-10-25
 
 ### Historical entries for the 2026-10-25 commits (written during Stage 4b-4)
 
@@ -1474,3 +1521,102 @@ production security certification, or a claim of production readiness.
   docstring; `draft` reporting an output-side error as an input
   problem; the cleanup-masking issue in `review._write_files`; and the
   manifest-path rule written in three places.
+
+### Quest page screenshots and first manual run — 2026-10-25 (evening)
+
+Written afterwards, on 2026-10-26, from the outputs I pasted into the
+Claude Code session; the date of the run is confirmed by me.
+
+- **Quest page:** I took three screenshots of the quest submission page
+  (22:40 local time). They were later transcribed into
+  `docs/quest_requirements.md` (Day 4).
+- **First manual run (by me):** this was the first time I ran the
+  whole flow myself (confirmed by me); the earlier full-flow checks
+  recorded here were run by the AI or by the tests. With AI guidance,
+  one
+  step at a time, I ran the whole flow on `data/messages.csv`, writing
+  only to a new, Git-ignored folder (`output/mytest/`):
+  1. `draft` → "Reviewed 12 message(s): 11 draft(s), 1 without a
+     draft, 4 with warnings." and "Nothing was sent."
+  2. Read `review.md`: **NOT SENT** at the top, the `demo-09`
+     instruction-override warning with only a neutral draft, `demo-07`
+     with no draft, `demo-12` filed as `other_or_unclear`.
+  3. Copied the worked example's decisions
+     (`examples/2_reviewed/review.csv`) and looked at them.
+  4. `finalize` → "3 approved, 2 edited, 2 rejected, 5 pending" and
+     "Input binding: verified by SHA-256".
+  5. Read `approved_unsent.md`: **NOT SENT**, 5 replies, each with
+     reply warnings.
+  6. Ran `finalize` again: refused with "Finalized file(s) already
+     exist … Nothing was changed."
+  7. Ran the permitted test suite: `785 passed`.
+- **In the output:** "approved" template replies still contain content
+  placeholders such as `[CONFIRM AVAILABILITY OR PROPOSE A TIME]`;
+  `demo-08` gets a non-blocking warning for "i will" in the worked
+  example's edit; in a
+  plain-text view `review.md` shows escaped punctuation (`\.`); the
+  empty-message entry repeats "No draft. No draft:". None of these were
+  changed.
+- **How it felt:** I felt relieved when it worked.
+- **What I would do differently:** run the app myself at the end of
+  each stage, and ask the AI to demonstrate the working app sooner.
+  Nothing else in the first run surprised me.
+
+## Day 4 — 2026-10-26
+
+### Quest requirements recorded — commit `0ec39eb`
+
+- **My decision:** save the quest page requirements in the repository
+  and replace the open item in `docs/intent.md` ("The exact challenge
+  instructions still need to be confirmed…").
+- **AI-generated:** `docs/quest_requirements.md`, transcribed by the AI
+  from my screenshots, with the page text kept separate from the
+  project's own notes, and a one-bullet change in `docs/intent.md`.
+- **Reviews (three rounds):** no Critical, High or Medium findings. The
+  reviewers pointed out that the first wording overclaimed ("copied",
+  "reproduced as shown") when it was an AI transcription. In round 2 a
+  reviewer found that the AI's own fix had made a new mistake: a rule
+  saying text in parentheses is not page text wrongly covered the
+  page's own heading "Anything else (optional)". Both were fixed before
+  I approved the commit.
+- **Open:** I have not yet compared the transcription word for word
+  with my screenshots; the file says so.
+
+### Written deliverables drafted (not committed)
+
+- **AI-generated:** `Final directive.md` (my interpretation of the
+  deliverable, which the quest page does not define),
+  `docs/unlearned.md` (first drafted with gaps for my own words),
+  the *Summary by day* and Day 2–5 headings in this log, the Day 3
+  evening entry (written from my pasted outputs) and these Day 4 and
+  Day 5 entries, a pointer in `docs/intent.md`, and in `README.md` a
+  command-line-only note, document pointers and a note on re-running
+  the sample commands. The drafts were then updated with my answers:
+  the day mapping, my first manual run and how it felt, what I would
+  do differently, my background, which candidate habits applied (two
+  partly, two yes, one no and removed), what I would keep doing, and
+  my confirmation of the directive's interpretation.
+- **Reviews (not a commit gate):** security and code-quality reviews
+  of these drafts found no Critical or High issues. Round 1 found four
+  Medium errors: the `--allow-unbound` safety rule was misstated;
+  "checked the test set once" left out the run before tuning; the
+  wildcard incident was described the wrong way round; and "the tests
+  did not show" overstated what running the app revealed. Round 2
+  found one more: a sentence claiming, in my voice, something about
+  what I had seen. Round 3 found none. Round 4, after my confirmed
+  facts were added, found five more. Four were fixed: the background
+  line and the headings in `docs/unlearned.md` stated facts and habits
+  I had not confirmed (two findings); "What I noticed" and "In the
+  output I saw" claimed what I perceived; and the Day 2 summary left
+  out the reviewer incident. The fifth, that two commit dates could not
+  be checked, was resolved from Git history without a change. Round 5
+  found two more: "the earlier checks … were run by the AI"
+  contradicted a Day 1 entry, and "me reviewing" on Day 1 suggested a
+  code review before D7. All of these and the Low findings were fixed
+  by the AI. Rounds 6 and 7 found no Critical, High or Medium issues.
+- **Not yet done:** the Loom video and the 5-minute video have not been
+  recorded.
+
+## Day 5 — 2026-10-27
+
+- **Not yet completed.**
